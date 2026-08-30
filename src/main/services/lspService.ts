@@ -14,7 +14,7 @@ import {
 } from '../../shared/lsp'
 import { isAllowedCommand } from '../../shared/security'
 import { ensureClangdConfig } from './clangdConfig'
-import { safeCommand } from './commandResolver'
+import { safeCommand, needsShell } from './commandResolver'
 
 /**
  * Bridges the renderer's Monaco editor to real language servers (clangd,
@@ -118,7 +118,9 @@ class LspServer {
         // no user action at all. Resolve from PATH first.
         const bin = safeCommand(cmd, this.root)
         if (!bin) return reject(new Error(`${cmd} resolved inside the workspace`))
-        proc = spawn(bin, args, { cwd: this.root, windowsHide: true })
+        // pyright's Windows install is a .cmd shim; CreateProcess cannot launch
+        // that directly. See needsShell's doc comment.
+        proc = spawn(bin, args, { cwd: this.root, windowsHide: true, shell: needsShell(bin) })
       } catch (e) {
         return reject(e)
       }

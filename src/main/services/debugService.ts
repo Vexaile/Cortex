@@ -8,7 +8,7 @@ import type { DebugStartRequest, DebugState, DebugFrame, DebugVariable } from '.
 import { isAllowedCommand, isBareCommand, sanitizeExtraArgs } from '../../shared/security'
 import { withinWorkspace, getWorkspaceRoot } from './fsService'
 import { emitDiagnostics } from './runnerService'
-import { safeCommand } from './commandResolver'
+import { safeCommand, needsShell } from './commandResolver'
 import { parseMiLine, asString, asArray, asTuple, type MiTuple, type MiValue } from '../../shared/gdbmi'
 
 const execFileAsync = promisify(execFile)
@@ -77,7 +77,7 @@ class GdbSession {
       // libuv searches it first on Windows, so a repo shipping gdb.exe would run.
       const gdbBin = safeCommand('gdb', getWorkspaceRoot())
       if (!gdbBin) throw new Error('gdb resolved inside the workspace')
-      gdb = spawn(gdbBin, ['--interpreter=mi2', this.exe], { cwd: this.cwd, windowsHide: true })
+      gdb = spawn(gdbBin, ['--interpreter=mi2', this.exe], { cwd: this.cwd, windowsHide: true, shell: needsShell(gdbBin) })
     } catch (e) {
       this.pushState({ status: 'exited', error: `Failed to launch gdb: ${String(e)}` })
       return
@@ -403,7 +403,7 @@ export async function start(win: BrowserWindow, req: DebugStartRequest): Promise
     let buf = ''
     let cp: ChildProcess
     try {
-      cp = spawn(compilerBin, args, { cwd: req.cwd, windowsHide: true })
+      cp = spawn(compilerBin, args, { cwd: req.cwd, windowsHide: true, shell: needsShell(compilerBin) })
       // Tracked so Stop and app-quit can reach it: an untracked compile child
       // survived both, and a heavy template build is exactly the case where a
       // user reaches for Stop.

@@ -10,7 +10,7 @@ import type {
   BoardUploadRequest
 } from '../../shared/ipc'
 import * as runner from './runnerService'
-import { safeCommand } from './commandResolver'
+import { safeCommand, needsShell } from './commandResolver'
 import { getWorkspaceRoot } from './fsService'
 
 const execFileAsync = promisify(execFile)
@@ -114,7 +114,7 @@ function streamCli(
     // cwd is the sketch directory, inside the project: resolve CLI from PATH.
     const cliBin = safeCommand(CLI, getWorkspaceRoot())
     if (!cliBin) throw new Error('arduino-cli resolved inside the workspace')
-    proc = spawn(cliBin, args, { cwd: sketchDir, windowsHide: true })
+    proc = spawn(cliBin, args, { cwd: sketchDir, windowsHide: true, shell: needsShell(cliBin) })
     // Decode UTF-8 across chunk boundaries (see runnerService).
     proc.stdout?.setEncoding('utf8')
     proc.stderr?.setEncoding('utf8')

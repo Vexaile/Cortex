@@ -99,6 +99,18 @@ export function commandMissing(cmd: string): boolean {
   return isBareCommand(cmd) && resolveOnPath(cmd) === null
 }
 
+/**
+ * True when a `safeCommand`-resolved binary needs a shell to actually launch.
+ * CreateProcess cannot execute a .bat/.cmd directly (only cmd.exe can), so an
+ * npm-installed tool - its Windows shim is always a .cmd, never a .exe - passes
+ * resolveOnPath's isExecutableFile check yet fails (or silently does nothing)
+ * at spawn() without this. clangd, gdb, host compilers and arduino-cli all ship
+ * as a real .exe and never need it; pyright, being an npm package, does.
+ */
+export function needsShell(bin: string): boolean {
+  return IS_WIN && /\.(cmd|bat)$/i.test(bin)
+}
+
 /** True when `p` sits at or under `root`. Case-insensitive on Windows. */
 function withinRoot(p: string, root?: string | null): boolean {
   if (!root) return false

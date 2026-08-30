@@ -2,7 +2,7 @@ import { spawn } from 'child_process'
 import { readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { getProjectConfig } from './projectConfigService'
-import { safeCommand } from './commandResolver'
+import { safeCommand, needsShell } from './commandResolver'
 import { getWorkspaceRoot } from './fsService'
 import { isAllowedCommand, isBareCommand, hostCppOrNull } from '../../shared/security'
 
@@ -75,7 +75,7 @@ function deriveToolchain(compiler: string): Promise<Toolchain> {
       // compiler-shaped file from whatever cwd this process happens to hold.
       const bin = safeCommand(compiler, getWorkspaceRoot())
       if (!bin) return resolve({ target: '', includes: [] })
-      cp = spawn(bin, ['-E', '-xc++', '-v', '-'], { windowsHide: true })
+      cp = spawn(bin, ['-E', '-xc++', '-v', '-'], { windowsHide: true, shell: needsShell(bin) })
     // Decode UTF-8 across chunk boundaries (see runnerService).
     cp.stdout?.setEncoding('utf8')
     cp.stderr?.setEncoding('utf8')

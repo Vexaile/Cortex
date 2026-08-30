@@ -16,7 +16,7 @@ import {
 } from '../../shared/diagnostics'
 import { isAllowedCommand, isBareCommand, commandBaseName, sanitizeExtraArgs, OPT_LEVELS } from '../../shared/security'
 import { withinWorkspace, getWorkspaceRoot } from './fsService'
-import { safeCommand, commandMissing } from './commandResolver'
+import { safeCommand, commandMissing, needsShell } from './commandResolver'
 
 const IS_WIN = platform() === 'win32'
 
@@ -171,7 +171,7 @@ async function compileNative(win: BrowserWindow, req: RunRequest): Promise<strin
   return new Promise((resolve) => {
     let proc: ChildProcess
     try {
-      proc = spawn(compilerBin, args, { cwd: req.cwd, windowsHide: true })
+      proc = spawn(compilerBin, args, { cwd: req.cwd, windowsHide: true, shell: needsShell(compilerBin) })
     } catch (err) {
       out(win, req.id, 'stderr', `Failed to launch compiler '${compiler}': ${String(err)}\n`)
       exit(win, { id: req.id, code: 127, signal: null, durationMs: 0, phase: 'compile' })
@@ -266,7 +266,7 @@ async function compileRust(win: BrowserWindow, req: RunRequest): Promise<string 
         resolve(null)
         return
       }
-      proc = spawn(rustcBin, args, { cwd: req.cwd, windowsHide: true })
+      proc = spawn(rustcBin, args, { cwd: req.cwd, windowsHide: true, shell: needsShell(rustcBin) })
     } catch (err) {
       out(win, req.id, 'stderr', `Failed to launch rustc: ${String(err)}\n`)
       exit(win, { id: req.id, code: 127, signal: null, durationMs: 0, phase: 'compile' })
@@ -354,7 +354,7 @@ function runProcess(
   const start = performance.now()
   let proc: ChildProcess
   try {
-    proc = spawn(commandBin, args, { cwd, windowsHide: true })
+    proc = spawn(commandBin, args, { cwd, windowsHide: true, shell: needsShell(commandBin) })
   } catch (err) {
     out(win, req.id, 'stderr', `Failed to launch '${command}': ${String(err)}\n`)
     exit(win, { id: req.id, code: 127, signal: null, durationMs: 0, phase: 'run' })

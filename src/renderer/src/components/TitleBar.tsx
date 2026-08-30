@@ -16,6 +16,7 @@ import { isHostCpp } from '@shared/security'
 import type { CppStandard, CStandard } from '@shared/ipc'
 import MenuBar from './MenuBar'
 import BoardPortSelect from './BoardPortSelect'
+import FileIcon from './FileIcon'
 
 const STANDARDS: CppStandard[] = ['c++11', 'c++14', 'c++17', 'c++20', 'c++23', 'c++2c']
 const C_STANDARDS: CStandard[] = ['c99', 'c11', 'c17', 'c23']
@@ -131,9 +132,12 @@ export default function TitleBar(): JSX.Element {
       <MenuBar />
 
       {workspaceName && (
-        <span className="truncate text-ide-muted">
-          {workspaceName}
-          {activeTab && <span className="text-ide-faint"> / {activeTab.name}</span>}
+        <span className="row min-w-0 gap-1.5">
+          <span className="truncate text-white">
+            {workspaceName}
+            {activeTab && <span> / {activeTab.name}</span>}
+          </span>
+          {activeTab && <FileIcon path={activeTab.path} size={13} />}
         </span>
       )}
 

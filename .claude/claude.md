@@ -566,7 +566,7 @@ User:
 "hi"
 
 Response:
-"Hey — what's up?"
+"Hey, what's up?"
 
 Factual request
 

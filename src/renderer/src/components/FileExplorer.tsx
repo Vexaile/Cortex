@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ChevronRight, ChevronDown, Folder, FolderOpen, RefreshCw, FilePlus, FolderPlus } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import PanelHeader from './PanelHeader'
@@ -15,64 +15,183 @@ function TreeIcon({ node }: { node: FileNode }): JSX.Element {
   return <FileIcon path={node.path} size={14} />
 }
 
+interface DialogState {
+  mode: 'rename' | 'newFile' | 'newFolder'
+  dir: string
+  path?: string
+  value: string
+}
+
+/**
+ * The VS Code-style inline row: an editable name field in place of a tree row,
+ * instead of a modal floating over the tree. Enter and blur both commit (blur
+ * commits rather than discards, matching VS Code - clicking away after typing
+ * a real name should not silently throw it out); Escape cancels. `settledRef`
+ * stops both firing for the same interaction: Enter moves focus, which then
+ * fires blur too, and without the guard that is two commits for one keypress.
+ */
+function InlineEditRow({
+  depth,
+  value,
+  isDir,
+  onChange,
+  onCommit,
+  onCancel
+}: {
+  depth: number
+  value: string
+  isDir: boolean
+  onChange: (v: string) => void
+  onCommit: () => void
+  onCancel: () => void
+}): JSX.Element {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const settledRef = useRef(false)
+
+  useEffect(() => {
+    inputRef.current?.focus()
+    inputRef.current?.select()
+  }, [])
+
+  const commitOnce = (): void => {
+    if (settledRef.current) return
+    settledRef.current = true
+    onCommit()
+  }
+  const cancelOnce = (): void => {
+    if (settledRef.current) return
+    settledRef.current = true
+    onCancel()
+  }
+
+  return (
+    <div className="row h-[24px] w-full gap-1 pr-2 text-[13px]" style={{ paddingLeft: depth * 12 + 6 }}>
+      <span className="w-[14px]" />
+      <span className="flex w-[14px] shrink-0 items-center justify-center">
+        {/* The icon follows the extension live: naming it main.py mid-type
+            shows the Python mark before you've even hit Enter. */}
+        {isDir ? <Folder size={14} className="text-ide-amber" /> : <FileIcon path={value || 'untitled.txt'} size={14} />}
+      </span>
+      <input
+        ref={inputRef}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={commitOnce}
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          // Otherwise Ctrl+S / F5 and the tree's own shortcuts see this keystroke too.
+          e.stopPropagation()
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            commitOnce()
+          } else if (e.key === 'Escape') {
+            e.preventDefault()
+            cancelOnce()
+          }
+        }}
+        className="mono h-[20px] min-w-0 flex-1 rounded-sm border border-ide-accent bg-ide-bg px-1 text-[13px] text-ide-text outline-none"
+      />
+    </div>
+  )
+}
+
 type OnContext = (x: number, y: number, node: FileNode) => void
 
-function TreeRow({ node, depth, onContext }: { node: FileNode; depth: number; onContext: OnContext }): JSX.Element {
+interface EditProps {
+  dialog: DialogState | null
+  onChangeValue: (v: string) => void
+  onCommit: (target: DialogState) => void
+  onCancel: (target: DialogState) => void
+}
+
+function TreeRow({
+  node,
+  depth,
+  onContext,
+  edit
+}: {
+  node: FileNode
+  depth: number
+  onContext: OnContext
+  edit: EditProps
+}): JSX.Element {
   const { expanded, childrenCache, toggleDir, openFile, activePath } = useStore()
   const isOpen = expanded.has(node.path)
   const isActive = activePath === node.path
   const children = childrenCache[node.path]
+  const { dialog, onChangeValue, onCommit, onCancel } = edit
 
   const onClick = (): void => {
     if (node.isDir) void toggleDir(node)
     else void openFile(node.path)
   }
 
+  const renaming = !!dialog && dialog.mode === 'rename' && dialog.path === node.path
+  const creatingHere = !!dialog && dialog.mode !== 'rename' && dialog.dir === node.path && node.isDir && isOpen
+
   return (
     <>
-      {/* A real button, not a click-only div: this is the primary open-file
-          action and it was unreachable by keyboard, and the shared focus ring
-          in styles/index.css only matches real controls. */}
-      <button
-        type="button"
-        onClick={onClick}
-        onContextMenu={(e) => {
-          e.preventDefault()
-          e.stopPropagation()
-          onContext(e.clientX, e.clientY, node)
-        }}
-        title={node.path}
-        className={`row h-[24px] w-full cursor-pointer select-none gap-1 pr-2 text-left text-[13px] hover:bg-ide-hover ${
-          isActive ? 'bg-ide-active' : ''
-        }`}
-        style={{ paddingLeft: depth * 12 + 6 }}
-      >
-        {node.isDir ? (
-          isOpen ? (
-            <ChevronDown size={14} className="text-ide-muted" />
+      {renaming && dialog ? (
+        <InlineEditRow
+          depth={depth}
+          value={dialog.value}
+          isDir={node.isDir}
+          onChange={onChangeValue}
+          onCommit={() => onCommit(dialog)}
+          onCancel={() => onCancel(dialog)}
+        />
+      ) : (
+        // A real button, not a click-only div: this is the primary open-file
+        // action and it was unreachable by keyboard, and the shared focus ring
+        // in styles/index.css only matches real controls.
+        <button
+          type="button"
+          onClick={onClick}
+          onContextMenu={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            onContext(e.clientX, e.clientY, node)
+          }}
+          title={node.path}
+          className={`row h-[24px] w-full cursor-pointer select-none gap-1 pr-2 text-left text-[13px] hover:bg-ide-hover ${
+            isActive ? 'bg-ide-active' : ''
+          }`}
+          style={{ paddingLeft: depth * 12 + 6 }}
+        >
+          {node.isDir ? (
+            isOpen ? (
+              <ChevronDown size={14} className="text-ide-muted" />
+            ) : (
+              <ChevronRight size={14} className="text-ide-muted" />
+            )
           ) : (
-            <ChevronRight size={14} className="text-ide-muted" />
-          )
-        ) : (
-          <span className="w-[14px]" />
-        )}
-        <span className="flex w-[14px] shrink-0 items-center justify-center">
-          <TreeIcon node={node} />
-        </span>
-        <span className="truncate">{node.name}</span>
-      </button>
-      {node.isDir &&
-        isOpen &&
-        children?.map((child) => <TreeRow key={child.path} node={child} depth={depth + 1} onContext={onContext} />)}
+            <span className="w-[14px]" />
+          )}
+          <span className="flex w-[14px] shrink-0 items-center justify-center">
+            <TreeIcon node={node} />
+          </span>
+          <span className="truncate">{node.name}</span>
+        </button>
+      )}
+      {node.isDir && isOpen && (
+        <>
+          {creatingHere && dialog && (
+            <InlineEditRow
+              depth={depth + 1}
+              value={dialog.value}
+              isDir={dialog.mode === 'newFolder'}
+              onChange={onChangeValue}
+              onCommit={() => onCommit(dialog)}
+              onCancel={() => onCancel(dialog)}
+            />
+          )}
+          {children?.map((child) => (
+            <TreeRow key={child.path} node={child} depth={depth + 1} onContext={onContext} edit={edit} />
+          ))}
+        </>
+      )}
     </>
   )
-}
-
-interface DialogState {
-  mode: 'rename' | 'newFile' | 'newFolder'
-  dir: string
-  path?: string
-  value: string
 }
 
 export default function FileExplorer(): JSX.Element {
@@ -85,7 +204,9 @@ export default function FileExplorer(): JSX.Element {
     renameEntry,
     deleteEntry,
     createNewFile,
-    createNewFolder
+    createNewFolder,
+    expanded,
+    toggleDir
   } = useStore()
   const [busy, setBusy] = useState(false)
   const [menu, setMenu] = useState<{ x: number; y: number; node: FileNode } | null>(null)
@@ -105,23 +226,46 @@ export default function FileExplorer(): JSX.Element {
   const dirOf = (node: FileNode | null): string =>
     node ? (node.isDir ? node.path : parentDir(node.path)) : workspaceRoot || ''
 
-  const submitDialog = async (): Promise<void> => {
-    if (!dialog || !dialog.value.trim()) return setDialog(null)
-    const name = dialog.value.trim()
-    if (dialog.mode === 'newFile') await createNewFile(dialog.dir, name)
-    else if (dialog.mode === 'newFolder') await createNewFolder(dialog.dir, name)
-    else if (dialog.mode === 'rename' && dialog.path) await renameEntry(dialog.path, name)
-    setDialog(null)
+  const startCreate = (mode: 'newFile' | 'newFolder', node: FileNode | null): void => {
+    const dir = dirOf(node)
+    // The target folder has to be expanded or the inline row has nowhere to
+    // render. A no-op when it's already open (or is the root, which is
+    // always "open").
+    if (dir !== workspaceRoot && !expanded.has(dir)) void toggleDir({ path: dir, name: '', isDir: true })
+    setDialog({ mode, dir, value: '' })
+  }
+
+  const startRename = (node: FileNode): void =>
+    setDialog({ mode: 'rename', dir: parentDir(node.path), path: node.path, value: node.name })
+
+  // Both take the specific dialog they were bound to (the value at the time the
+  // input was rendered), and only clear state if it's STILL the current one.
+  // Enter commits, and the blur that follows (focus leaving the about-to-unmount
+  // input) can fire a second time - by then the user may have already opened a
+  // new dialog, and an unconditional setDialog(null) would wipe that out.
+  const commitDialog = async (target: DialogState): Promise<void> => {
+    const name = target.value.trim()
+    if (name) {
+      if (target.mode === 'newFile') await createNewFile(target.dir, name)
+      else if (target.mode === 'newFolder') await createNewFolder(target.dir, name)
+      else if (target.mode === 'rename' && target.path) await renameEntry(target.path, name)
+    }
+    setDialog((cur) => (cur === target ? null : cur))
+  }
+  const cancelDialog = (target: DialogState): void => setDialog((cur) => (cur === target ? null : cur))
+
+  const edit: EditProps = {
+    dialog,
+    onChangeValue: (v) => setDialog((cur) => (cur ? { ...cur, value: v } : cur)),
+    onCommit: (target) => void commitDialog(target),
+    onCancel: cancelDialog
   }
 
   const menuActions = menu
     ? [
-        { label: 'New File', run: () => setDialog({ mode: 'newFile', dir: dirOf(menu.node), value: '' }) },
-        { label: 'New Folder', run: () => setDialog({ mode: 'newFolder', dir: dirOf(menu.node), value: '' }) },
-        {
-          label: 'Rename',
-          run: () => setDialog({ mode: 'rename', dir: parentDir(menu.node.path), path: menu.node.path, value: menu.node.name })
-        },
+        { label: 'New File', run: () => startCreate('newFile', menu.node) },
+        { label: 'New Folder', run: () => startCreate('newFolder', menu.node) },
+        { label: 'Rename', run: () => startRename(menu.node) },
         {
           label: 'Delete',
           run: () => {
@@ -132,6 +276,8 @@ export default function FileExplorer(): JSX.Element {
       ]
     : []
 
+  const creatingAtRoot = dialog && dialog.mode !== 'rename' && dialog.dir === workspaceRoot
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <PanelHeader
@@ -139,14 +285,14 @@ export default function FileExplorer(): JSX.Element {
           <>
             <button
               className="rounded p-1 hover:bg-ide-hover hover:text-ide-text"
-              onClick={() => workspaceRoot && setDialog({ mode: 'newFile', dir: workspaceRoot, value: '' })}
+              onClick={() => workspaceRoot && startCreate('newFile', null)}
               title="New file"
             >
               <FilePlus size={14} />
             </button>
             <button
               className="rounded p-1 hover:bg-ide-hover hover:text-ide-text"
-              onClick={() => workspaceRoot && setDialog({ mode: 'newFolder', dir: workspaceRoot, value: '' })}
+              onClick={() => workspaceRoot && startCreate('newFolder', null)}
               title="New folder"
             >
               <FolderPlus size={14} />
@@ -180,7 +326,21 @@ export default function FileExplorer(): JSX.Element {
             No folder is open.
           </EmptyState>
         ) : (
-          tree.map((node) => <TreeRow key={node.path} node={node} depth={0} onContext={(x, y, n) => setMenu({ x, y, node: n })} />)
+          <>
+            {creatingAtRoot && dialog && (
+              <InlineEditRow
+                depth={0}
+                value={dialog.value}
+                isDir={dialog.mode === 'newFolder'}
+                onChange={edit.onChangeValue}
+                onCommit={() => edit.onCommit(dialog)}
+                onCancel={() => edit.onCancel(dialog)}
+              />
+            )}
+            {tree.map((node) => (
+              <TreeRow key={node.path} node={node} depth={0} onContext={(x, y, n) => setMenu({ x, y, node: n })} edit={edit} />
+            ))}
+          </>
         )}
       </div>
 
@@ -203,35 +363,6 @@ export default function FileExplorer(): JSX.Element {
               {a.label}
             </button>
           ))}
-        </div>
-      )}
-
-      {/* input dialog (replaces window.prompt) */}
-      {dialog && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 pt-32" onClick={() => setDialog(null)}>
-          <div className="w-96 rounded-lg border border-ide-border bg-ide-panel p-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="mb-2 text-[12px] font-medium text-ide-text">
-              {dialog.mode === 'rename' ? 'Rename' : dialog.mode === 'newFile' ? 'New file' : 'New folder'}
-            </div>
-            <input
-              autoFocus
-              className="mono w-full rounded bg-ide-bg px-2 py-1.5 text-[13px] outline-none focus:ring-1 focus:ring-ide-accent"
-              value={dialog.value}
-              onChange={(e) => setDialog({ ...dialog, value: e.target.value })}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void submitDialog()
-                if (e.key === 'Escape') setDialog(null)
-              }}
-            />
-            <div className="mt-3 row justify-end gap-2">
-              <button className="btn text-[12px]" onClick={() => setDialog(null)}>
-                Cancel
-              </button>
-              <button className="btn btn-accent text-[12px]" onClick={() => void submitDialog()}>
-                {dialog.mode === 'rename' ? 'Rename' : 'Create'}
-              </button>
-            </div>
-          </div>
         </div>
       )}
     </div>
