@@ -1,0 +1,14 @@
+node_modules/
+out/
+dist/
+release/
+*.log
+.DS_Store
+.vite/
+build-artifacts/
+.cache/
+*.tsbuildinfo
+target/
+examples/multilang/firmware.elf
+# Cortex compiled-user-program scratch outputs
+.cortex/

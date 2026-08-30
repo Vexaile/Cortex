@@ -1,0 +1,211 @@
+import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
+/**
+ * Guards the workspace reset against the defect it was written for: not a wrong
+ * reset, but an incomplete one. openWorkspace listed seven keys, and every
+ * workspace-scoped key added to the store afterwards was never added to it, so
+ * opening a second folder carried the first project's circuit, tabs, board
+ * target and running processes into it.
+ *
+ * The store imports zustand and reaches for `window`, and the test env is node
+ * with no jsdom, so this reads the source rather than the module. That is
+ * deliberate: the question here is "does this key appear in the reset", which
+ * is a question about the text.
+ */
+
+const SRC = readFileSync(join(__dirname, '..', 'src', 'renderer', 'src', 'store', 'useStore.ts'), 'utf8')
+
+/** The body of workspaceScopedReset(). */
+function resetBody(): string {
+  const start = SRC.indexOf('export function workspaceScopedReset()')
+  expect(start, 'workspaceScopedReset must exist').toBeGreaterThan(-1)
+  const end = SRC.indexOf('\n}', start)
+  return SRC.slice(start, end)
+}
+
+/**
+ * The reset's effective keys: its own literal, plus the body of every constant
+ * it spreads in.
+ *
+ * Resolving the spread is the whole point. Accepting the literal text
+ * '...SIM_PIN_RESET' as proof that simPinModes is cleared made the assertion a
+ * function of the key's own name: deleting simPinModes from SIM_PIN_RESET left
+ * every test green, including the one called 'clears simPinModes'.
+ */
+function resetKeys(): string {
+  const body = resetBody()
+  let text = body
+  for (const m of body.matchAll(/\.\.\.(\w+)/g)) {
+    const name = m[1]
+    // To end of line, not to the first brace: the values are themselves object
+    // literals, so `\{[^}]*\}` stops inside the first one and silently drops
+    // every key after it.
+    const decl = SRC.match(new RegExp(`const ${name} = [^\\n]*`))
+    expect(decl, `the spread ...${name} must resolve to a const declaration in this file`).toBeTruthy()
+    text += '\n' + decl![0]
+  }
+  return text
+}
+
+/**
+ * State that belongs to one project. Every key here must be cleared when
+ * another folder is opened. Adding workspace-scoped state to the store means
+ * adding it here and to the reset, and this test is the reminder.
+ */
+const WORKSPACE_SCOPED = [
+  'childrenCache',
+  'expanded',
+  'tabs',
+  'activePath',
+  'reveal',
+  'simParts',
+  'simSerial',
+  'simInputs',
+  'simWiring',
+  'simPinStates',
+  'simPinPwm',
+  'simPinModes',
+  'simRunning',
+  'simRunId',
+  'running',
+  'runId',
+  'runPhase',
+  'runAction',
+  'lastExitCode',
+  'output',
+  'diagnostics',
+  'selectedFqbn',
+  'serialLines',
+  'serialCarry',
+  'serialError',
+  'plotSeries'
+]
+
+describe('workspaceScopedReset', () => {
+  const keys = resetKeys()
+
+  it.each(WORKSPACE_SCOPED)('clears %s', (key) => {
+    expect(new RegExp(`\\b${key}\\s*:`).test(keys), `${key} missing from the reset`).toBe(true)
+  })
+
+  // Guards the guard: if the spread stops resolving, every key that arrives
+  // through it would silently stop being checked.
+  it('resolves the constants it spreads in', () => {
+    expect(resetBody()).toContain('...SIM_PIN_RESET')
+    expect(keys.length).toBeGreaterThan(resetBody().length)
+    expect(keys).toContain('simPinModes')
+  })
+
+  it('is applied by openWorkspace', () => {
+    const open = SRC.slice(SRC.indexOf('async openWorkspace('), SRC.indexOf('await window.api.watchStart'))
+    expect(open).toContain('...workspaceScopedReset()')
+  })
+
+  // Both entry guards return silently when their flag is set, so a run carried
+  // in from the old project makes the new project's Run button do nothing.
+  it('stops the previous project processes before switching', () => {
+    const open = SRC.slice(SRC.indexOf('async openWorkspace('), SRC.indexOf('await window.api.watchStart'))
+    expect(open).toContain('stopRun()')
+    expect(open).toContain('stopSim()')
+  })
+
+  // openWorkspace seeds default parts and then loads. If a load path returns
+  // without assigning, the seeded (or previous project's) parts stay on the
+  // canvas and saveDiagram writes them into this project's file.
+  describe('loadDiagram is authoritative about simParts', () => {
+    const load = SRC.slice(SRC.indexOf('async loadDiagram()'), SRC.indexOf('async detectToolchains'))
+
+    it('assigns parts when the file is missing', () => {
+      expect(load).toMatch(/exists\(file\)\)\) return set\(\{ simParts:/)
+    })
+
+    it('assigns parts when the file is not a diagram', () => {
+      expect(load).toMatch(/isArray\(data\.parts\)\) return set\(\{ simParts:/)
+    })
+
+    it('assigns parts when the file is unreadable', () => {
+      const katch = load.slice(load.indexOf('} catch'))
+      expect(katch).toContain('simParts')
+    })
+
+    // Any new exit must assign parts too.
+    //
+    // Allowlisted by content, at any depth. An earlier version keyed on
+    // indentation and filtered on the same properties it then asserted, so it
+    // compared [] to [] and could not fail. Depth is also the wrong signal:
+    // loadDiagram has its own control flow nested inside the try.
+    it('has no early return that leaves simParts unassigned', () => {
+      const ALLOWED = [
+        /^if \(!root\) return$/, // no workspace: no project to be definite about
+        /return set\(\{ simParts:/, // assigns
+        /^return oldSpace$/ // the v1 rescale map callback's value, not an exit
+      ]
+      // Whole lines. Matching from the `return` keyword onward threw away the
+      // guard that precedes it, so `if (!root) return` arrived as bare
+      // 'return' and matched nothing.
+      const returns = load
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => /\breturn\b/.test(l))
+      expect(returns.length, 'the scan must actually find returns').toBeGreaterThan(2)
+      const unaccounted = returns.filter((r) => !ALLOWED.some((a) => a.test(r)))
+      expect(unaccounted, 'every exit from loadDiagram must assign simParts').toEqual([])
+    })
+
+    it('is awaited by openWorkspace, so the canvas never paints stale parts', () => {
+      expect(SRC).toContain('await get().loadDiagram()')
+    })
+  })
+
+  /**
+   * Everything in ProjectConfig is per project, so none of it may fall back to
+   * the live value: that IS the previous project's. These four resolve in
+   * loadProjectConfig rather than in the static reset because two of them need
+   * the app defaults and detection, which a pure function cannot reach.
+   */
+  describe('loadProjectConfig is authoritative', () => {
+    // persistProjectConfig is the next function in the file. Slicing to
+    // detectToolchains ran backwards (it is declared 200 lines earlier) and
+    // silently produced an empty string, which every assertion then "passed".
+    const start = SRC.indexOf('async loadProjectConfig()')
+    const end = SRC.indexOf('async persistProjectConfig(')
+    const load = SRC.slice(start, end)
+
+    it('slices a real function body', () => {
+      expect(start).toBeGreaterThan(-1)
+      expect(end).toBeGreaterThan(start)
+      expect(load).toContain('getProjectConfig')
+    })
+
+    // Generalized on purpose: the old assertion banned this shape for exactly
+    // one key while `cfg.compiler || get().compiler` sat three lines above it.
+    it('no project setting falls back to the live value', () => {
+      const leaks = [...load.matchAll(/cfg\.\w+ \|\| get\(\)\.\w+/g)].map((m) => m[0])
+      expect(leaks, 'a project setting resolving to get().X carries the previous project in').toEqual([])
+    })
+
+    it.each(['compiler', 'std', 'optimization', 'selectedFqbn'])('resolves %s', (key) => {
+      expect(new RegExp(`\\b${key}:`).test(load), `${key} must be resolved on open`).toBe(true)
+    })
+
+    // The two-level ones must reach the app default, or an empty project value
+    // lands on a literal and overrides what detection chose.
+    it('lets the app default win over a hardcoded compiler', () => {
+      expect(load).toContain('defaultCppCompiler')
+      expect(load).toContain('defaultCppStandard')
+    })
+
+    // Asserted on the expression, not on file offsets: the comment above it
+    // names both 'g++' and detection, so an indexOf comparison was measuring
+    // prose.
+    it('resolves the compiler project, then app default, then detection, then a literal', () => {
+      expect(load).toContain('isHostCpp')
+      // The project value goes through hostCppOrNull first: .cortex/config.json
+      // is untrusted, so 'gcc' must be normalized to 'g++' and a cross driver
+      // like 'arm-none-eabi-g++' must not become the host compiler at all.
+      expect(load).toMatch(/compiler: hostCppOrNull\(cfg\.compiler\) \|\| s\?\.defaultCppCompiler \|\| detected \|\| 'g\+\+'/)
+    })
+  })
+})

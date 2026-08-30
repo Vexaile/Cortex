@@ -1,0 +1,112 @@
+import { existsSync, statSync } from 'fs'
+import { delimiter, isAbsolute, join, resolve } from 'path'
+import { isBareCommand } from '../../shared/security'
+
+/**
+ * Resolve a command to an absolute executable path BEFORE spawning it.
+ *
+ * The whole command-trust model rested on "a bare name is safe, because it is
+ * resolved via PATH". On Windows that is false for the runtime this app ships:
+ * libuv's process spawn searches the CHILD'S WORKING DIRECTORY before it scans
+ * PATH. Every spawn here runs with a cwd inside the user's project - the runner
+ * uses the file's directory, the LSP uses the workspace root - so a repository
+ * containing `main.py` next to a malicious `python.exe` executed that binary the
+ * moment the user pressed Run. No config file, no setting, no prompt.
+ *
+ * Verified on this machine against electron 33's libuv: a planted
+ * `<repo>/python.exe` ran in place of the real interpreter.
+ *
+ * Setting NoDefaultCurrentDirectoryInExePath in the child's environment does not
+ * help, because the search happens in the parent. The fix is to do the lookup
+ * ourselves, from PATH only, and hand spawn an absolute path.
+ */
+
+const IS_WIN = process.platform === 'win32'
+
+/** Windows executable extensions, in the order the shell would try them. */
+function extensions(): string[] {
+  if (!IS_WIN) return ['']
+  const pathext = process.env['PATHEXT'] || '.COM;.EXE;.BAT;.CMD'
+  // Lowercased: PATHEXT is conventionally uppercase, the filesystem is
+  // case-insensitive either way, and 'python.EXE' in the Output panel's command
+  // line looks like a bug. '' comes first so an explicit `foo.exe` argument
+  // still matches itself.
+  return ['', ...pathext.split(';').filter(Boolean).map((e) => e.toLowerCase())]
+}
+
+function isExecutableFile(p: string): boolean {
+  try {
+    return existsSync(p) && statSync(p).isFile()
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Look `cmd` up in PATH and return an absolute path, or null when it is not
+ * found. Only PATH is consulted: never the cwd, and never a relative entry in
+ * PATH (an attacker-influenced relative entry would reintroduce the same hole).
+ */
+export function resolveOnPath(cmd: string): string | null {
+  const dirs = (process.env['PATH'] || '').split(delimiter).filter((d) => d && isAbsolute(d))
+  for (const dir of dirs) {
+    for (const ext of extensions()) {
+      const candidate = join(dir, cmd + ext)
+      if (isExecutableFile(candidate)) return candidate
+    }
+  }
+  return null
+}
+
+/**
+ * The command to hand to spawn/execFile, or null when it cannot be run safely.
+ *
+ * - A **bare name** is resolved against PATH, so the cwd can never win. This is
+ *   the whole point: it is the only form whose meaning the cwd could change.
+ * - An **absolute path** passes through. Callers already gate those on their own
+ *   terms, and two legitimate ones deliberately live inside the workspace: the
+ *   executable Cortex just built into `.cortex/build`, and a project's venv
+ *   interpreter. Refusing in-workspace absolutes here would break both.
+ * - A **relative path** is refused. It resolves against the project and there is
+ *   no reading of it we can defend.
+ *
+ * `unsafeRoot` is a defence in depth on the PATH lookup itself: if PATH somehow
+ * contains a directory inside the open project, a hit there is refused.
+ *
+ * Returning null rather than throwing lets each caller report the failure in the
+ * way its own surface already does (install hints, debug state, silence).
+ */
+export function safeCommand(cmd: string, unsafeRoot?: string | null): string | null {
+  if (!cmd) return null
+  if (isAbsolute(cmd)) return cmd
+  if (!isBareCommand(cmd)) return null
+  const found = resolveOnPath(cmd)
+  // NOT-FOUND MUST STILL BE null. Handing the bare name back to spawn moves the
+  // lookup straight back into libuv, which searches the child's cwd first - so
+  // the fallback restored the exact hole this file exists to close, on precisely
+  // the machines a drive-by targets: the ones missing the tool the repo needs.
+  // Callers distinguish "not installed" from "refused" with commandMissing().
+  if (!found) return null
+  return withinRoot(found, unsafeRoot) ? null : found
+}
+
+/**
+ * True when `cmd` is simply not installed, as opposed to refused. Lets a caller
+ * keep its "install this tool" message instead of reporting a security refusal
+ * for a machine that just does not have the toolchain.
+ */
+export function commandMissing(cmd: string): boolean {
+  return isBareCommand(cmd) && resolveOnPath(cmd) === null
+}
+
+/** True when `p` sits at or under `root`. Case-insensitive on Windows. */
+function withinRoot(p: string, root?: string | null): boolean {
+  if (!root) return false
+  const norm = (x: string): string => {
+    const s = resolve(x).replace(/\\/g, '/').replace(/\/+$/, '')
+    return IS_WIN ? s.toLowerCase() : s
+  }
+  const r = norm(root)
+  const t = norm(p)
+  return t === r || t.startsWith(r + '/')
+}

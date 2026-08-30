@@ -1,0 +1,676 @@
+import { app, shell, BrowserWindow, ipcMain, dialog, session } from 'electron'
+import { join } from 'path'
+import { homedir } from 'os'
+import { IPC } from '../shared/ipc'
+import type {
+  RunRequest,
+  SerialOpenOptions,
+  AppInfo,
+  ProjectConfig,
+  BoardCompileRequest,
+  BoardUploadRequest,
+  PackageInstallRequest,
+  SearchQuery,
+  DebugStartRequest,
+  SimStartRequest
+} from '../shared/ipc'
+import * as fsService from './services/fsService'
+import * as search from './services/searchService'
+import * as toolchain from './services/toolchainService'
+import * as runner from './services/runnerService'
+import * as serial from './services/serialService'
+import * as settings from './services/settingsService'
+import * as ai from './services/aiService'
+import type { AiRequest } from './services/aiService'
+import * as projectConfig from './services/projectConfigService'
+import * as embedded from './services/embeddedService'
+import * as pkg from './services/packageService'
+import * as debug from './services/debugService'
+import * as sim from './services/simService'
+import * as lsp from './services/lspService'
+import type { LspCall } from '../shared/lsp'
+
+let mainWindow: BrowserWindow | null = null
+
+// A second instance would clobber settings.json, the file watcher, and the
+// serial port. Keep a single instance and focus the existing window instead.
+const gotSingleInstanceLock = app.requestSingleInstanceLock()
+if (!gotSingleInstanceLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.focus()
+    }
+  })
+}
+
+// Never let a stray async error take down the whole main process for 100k users.
+process.on('uncaughtException', (err) => {
+  console.error('[cortex] uncaughtException:', err)
+})
+process.on('unhandledRejection', (reason) => {
+  console.error('[cortex] unhandledRejection:', reason)
+})
+
+function createWindow(): void {
+  mainWindow = new BrowserWindow({
+    width: 1440,
+    height: 900,
+    minWidth: 900,
+    minHeight: 600,
+    show: false,
+    autoHideMenuBar: true,
+    backgroundColor: '#1e1f22',
+    title: 'Cortex',
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      sandbox: false,
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  })
+
+  mainWindow.on('ready-to-show', () => {
+    mainWindow?.show()
+    // Dev-only: drive the UI and write screenshots, for the design audit loop.
+    if (!app.isPackaged && process.env['CORTEX_CAPTURE_DIR'] && mainWindow) {
+      void runCaptureSequence(mainWindow, process.env['CORTEX_CAPTURE_DIR'])
+    }
+  })
+
+  mainWindow.webContents.setWindowOpenHandler((details) => {
+    void shell.openExternal(details.url)
+    return { action: 'deny' }
+  })
+
+  // electron-vite injects ELECTRON_RENDERER_URL in dev.
+  const devUrl = process.env['ELECTRON_RENDERER_URL']
+  if (devUrl) {
+    void mainWindow.loadURL(devUrl)
+  } else {
+    void mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+  }
+}
+
+function requireWindow(): BrowserWindow {
+  if (!mainWindow) throw new Error('No active window')
+  return mainWindow
+}
+
+/**
+ * Dev-only screenshot driver. Set CORTEX_CAPTURE_DIR (plus optional
+ * CORTEX_CAPTURE_WS / CORTEX_CAPTURE_FILE) to render each major view and write
+ * PNGs, then quit. Used by the design-audit loop.
+ */
+async function runCaptureSequence(win: BrowserWindow, dir: string): Promise<void> {
+  const { writeFile, mkdir } = await import('fs/promises')
+  await mkdir(dir, { recursive: true })
+  const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+  const js = (code: string): Promise<unknown> => win.webContents.executeJavaScript(code)
+  const snap = async (name: string): Promise<void> => {
+    const img = await win.webContents.capturePage()
+    await writeFile(join(dir, `${name}.png`), img.toPNG())
+  }
+  try {
+    // The splash breathes for ~1.2s then fades. Wait for the logo to actually
+    // be in the DOM (the renderer bundle is heavy, so a fixed delay races first
+    // paint) then snap before it goes.
+    await js(`new Promise((resolve) => {
+      const start = Date.now()
+      const tick = () => {
+        if (document.querySelector('.cortex-breathe') || Date.now() - start > 5000) {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve(true)))
+        } else {
+          requestAnimationFrame(tick)
+        }
+      }
+      tick()
+    })`)
+    await wait(200)
+    await snap('00-splash')
+    await wait(2500)
+    await snap('01-welcome')
+    const ws = process.env['CORTEX_CAPTURE_WS']
+    if (ws) {
+      await js(`window.__cortexStore.getState().openWorkspace(${JSON.stringify(ws)})`)
+      await wait(1500)
+      await snap('02-editor-empty')
+      const file = process.env['CORTEX_CAPTURE_FILE']
+      if (file) {
+        await js(`window.__cortexStore.getState().openFile(${JSON.stringify(file)})`)
+        await wait(2000)
+        await snap('03-editor')
+        // Language-gating probe: assert the chrome matches what Cortex can
+        // actually do with this file, rather than eyeballing a screenshot.
+        if (process.env['CORTEX_CAPTURE_LANGPROBE']) {
+          const gate = await js(`(() => {
+            const btn = (label) => [...document.querySelectorAll('button')].find((b) => (b.textContent || '').trim().startsWith(label))
+            const run = btn('Run')
+            const dbg = btn('Debug')
+            const s = window.__cortexStore.getState()
+            const tab = s.tabs.find((t) => t.path === s.activePath)
+            return {
+              file: (s.activePath || '').split(/[\\\\/]/).pop(),
+              language: tab && tab.language.label,
+              monaco: tab && tab.language.monaco,
+              runnable: tab && tab.language.runnable,
+              debuggable: tab && tab.language.debuggable,
+              runDisabled: run ? run.disabled : null,
+              runTitle: run ? run.title : null,
+              debugDisabled: dbg ? dbg.disabled : null,
+              lspServers: s.lspServers
+            }
+          })()`)
+          await writeFile(join(dir, 'lang-gate.json'), JSON.stringify(gate, null, 2))
+          // Actually Run the file and capture what the user would see: the
+          // Output text and the parsed diagnostics that drive Problems + the
+          // editor gutter.
+          if (process.env['CORTEX_CAPTURE_RUN']) {
+            await js(`window.__cortexStore.getState().runActive()`)
+            await wait(Number(process.env['CORTEX_RUN_WAIT'] ?? 15000))
+            const run = await js(`(() => {
+              const s = window.__cortexStore.getState()
+              return {
+                exitCode: s.lastExitCode,
+                // Whether the compile -> run transition actually happened: the
+                // stdin box and the status bar are both gated on it.
+                runPhase: s.runPhase,
+                running: s.running,
+                diagnostics: s.diagnostics,
+                output: s.output.map((o) => o.stream + ': ' + o.text).join('')
+              }
+            })()`)
+            await writeFile(join(dir, 'run-result.json'), JSON.stringify(run, null, 2))
+            await snap('run-result')
+          }
+          // Prove the LSP providers are actually registered for THIS file's
+          // Monaco id (Monaco keeps `c` and `cpp` separate, so registering only
+          // 'cpp' left .c files with a badge but no completion).
+          const trigger = process.env['CORTEX_LSP_TRIGGER']
+          if (trigger) {
+            const [lineStr, colStr, text] = trigger.split('|')
+            await js(`(() => {
+              const ed = window.__cortexEditor
+              if (!ed) return
+              ed.setPosition({ lineNumber: ${Number(lineStr)}, column: 1000 })
+              ed.trigger('kb', 'type', { text: ${JSON.stringify('\n' + (text ?? ''))} })
+            })()`)
+            await wait(Number(process.env['CORTEX_LSP_WAIT'] ?? 2500))
+            const comp = await js(`(async () => {
+              const s = window.__cortexStore.getState()
+              const uri = 'file:///' + s.activePath.replace(/\\\\/g, '/')
+              const res = await window.api.lspRequest({
+                lang: ${JSON.stringify(process.env['CORTEX_LSP_LANG'] ?? 'cpp')}, root: s.workspaceRoot,
+                method: 'textDocument/completion',
+                params: { textDocument: { uri }, position: { line: ${Number(lineStr)}, character: ${Number(colStr)} } }
+              })
+              const items = Array.isArray(res) ? res : (res && res.items) || []
+              return items.slice(0, 25).map((i) => i.label)
+            })()`)
+            await writeFile(join(dir, 'lsp-c-completion.json'), JSON.stringify(comp, null, 2))
+            // Which documents the client actually registered, and what the raw
+            // request returns. Built here (not in injected JS) to keep escaping
+            // simple.
+            const probeUri = 'file:///' + file.replace(/\\/g, '/')
+            const state = await js(
+              `window.__cortexLsp ? { available: window.__cortexLsp.available(), openDocs: window.__cortexLsp.openDocs() } : null`
+            )
+            const rawReq = await js(
+              `window.api.lspRequest(${JSON.stringify({
+                lang: process.env['CORTEX_LSP_LANG'] ?? 'cpp',
+                root: ws,
+                method: 'textDocument/hover',
+                params: { textDocument: { uri: probeUri }, position: { line: 4, character: 20 } }
+              })}).catch((e) => ({ error: String(e) }))`
+            )
+            await writeFile(
+              join(dir, 'lsp-diag.json'),
+              JSON.stringify({ probeUri, state, hover: rawReq }, null, 2)
+            )
+          }
+        }
+        // Snap each sidebar panel (skeleton verification). Gated so the normal
+        // capture is unaffected.
+        if (process.env['CORTEX_CAPTURE_PANELS']) {
+          for (const v of ['search', 'boards', 'libraries', 'debug', 'settings']) {
+            await js(`window.__cortexStore.getState().setSidebar(${JSON.stringify(v)})`)
+            await wait(500)
+            await snap(`panel-${v}`)
+          }
+          // Search with a real query (functional verification).
+          await js(`window.__cortexStore.getState().setSidebar('search')`)
+          await wait(300)
+          await js(`(() => {
+            const inp = document.querySelector('input[placeholder="Search files and text..."]')
+            if (!inp) return
+            const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+            setter.call(inp, 'MovingAverage')
+            inp.dispatchEvent(new Event('input', { bubbles: true }))
+          })()`)
+          await wait(1000) // debounce + search
+          await snap('panel-search-results')
+          // Boards Manager: type a filter, then wait for arduino-cli (no daemon;
+          // ~10s per call in this environment).
+          await js(`window.__cortexStore.getState().setSidebar('boards')`)
+          await js(`(() => {
+            const inp = document.querySelector('input[placeholder="Filter boards (ESP32, RP2040, AVR)..."]')
+            if (!inp) return
+            const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+            setter.call(inp, 'esp32')
+            inp.dispatchEvent(new Event('input', { bubbles: true }))
+          })()`)
+          await wait(22000)
+          await snap('panel-boards-live')
+          // Deterministic proof of the renderer -> main -> arduino-cli -> parse
+          // path, independent of any React timing.
+          const coreProbe = await js(`(async () => {
+            const t0 = Date.now()
+            const r = await window.api.coreSearch('esp32').catch((e) => ({ error: String(e) }))
+            return { ms: Date.now() - t0, isArray: Array.isArray(r), count: Array.isArray(r) ? r.length : null,
+                     first: Array.isArray(r) && r[0] ? { id: r[0].id, name: r[0].name, latest: r[0].latestVersion, versions: (r[0].versions||[]).length } : r }
+          })()`)
+          await writeFile(join(dir, 'core-search-probe.json'), JSON.stringify(coreProbe, null, 2))
+          // Library Manager with a query.
+          await js(`window.__cortexStore.getState().setSidebar('libraries')`)
+          await wait(400)
+          await js(`(() => {
+            const inp = document.querySelector('input[placeholder="Search libraries (Servo, ArduinoJson)..."]')
+            if (!inp) return
+            const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+            setter.call(inp, 'servo')
+            inp.dispatchEvent(new Event('input', { bubbles: true }))
+          })()`)
+          await wait(22000)
+          await snap('panel-libraries-live')
+          await js(`window.__cortexStore.getState().setSidebar('explorer')`)
+          await wait(300)
+        }
+        // Debugger (gdb): set a breakpoint, start, and verify it stops there
+        // with a live call stack + variables + current-line highlight.
+        if (process.env['CORTEX_CAPTURE_DEBUG'] && /\.(cpp|cc|cxx|c)$/i.test(file)) {
+          await js(`window.__cortexStore.getState().toggleBreakpoint(${JSON.stringify(file)}, 30)`)
+          await wait(400)
+          await snap('debug-breakpoint')
+          await js(`window.__cortexStore.getState().startDebug()`)
+          await wait(7000) // compile + gdb launch + run to breakpoint
+          await snap('debug-stopped')
+          const dbg = await js(`(() => {
+            const d = window.__cortexStore.getState().debug
+            return {
+              status: d.status,
+              // Without this a failed build and a clean run-to-completion both
+              // read as a bare status:'exited'.
+              error: d.error,
+              reason: d.reason,
+              currentLine: d.currentLine,
+              frames: d.stack.map((f) => f.func + '@' + f.line),
+              variables: d.variables.map((v) => v.name + '=' + v.value)
+            }
+          })()`)
+          // The gdb/compile transcript, not just the resulting state: when a
+          // session ends without stopping there is nothing in the state to say
+          // whether the build failed, gdb was missing, or the breakpoint simply
+          // never bound.
+          const dbgOut = await js(
+            `window.__cortexStore.getState().output.map((o) => o.stream + ': ' + o.text).join('')`
+          )
+          await writeFile(join(dir, 'debug-output.txt'), String(dbgOut))
+          await writeFile(join(dir, 'debug-state.json'), JSON.stringify(dbg, null, 2))
+          await js(`window.__cortexStore.getState().debugStepOver()`)
+          await wait(1800)
+          await snap('debug-stepped')
+          await js(`window.__cortexStore.getState().stopDebug()`)
+          await wait(400)
+        }
+        // Board + Port selector (sketch only): open the dropdown, then the dialog.
+        if (process.env['CORTEX_CAPTURE_BOARDPORT'] && /\.ino$/i.test(file)) {
+          await js(
+            `[...document.querySelectorAll('button')].find((b) => b.title === 'Select board and port')?.click()`
+          )
+          await wait(500)
+          await snap('boardport-dropdown')
+          await js(
+            `[...document.querySelectorAll('button')].find((b) => (b.textContent || '').includes('Select other board and port'))?.click()`
+          )
+          await wait(700)
+          await snap('boardport-dialog')
+          await js(`document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))`)
+          await wait(200)
+        }
+        // LSP completion, C/C++ only. Type a member access, let didChange flush
+        // to clangd, then verify two ways: (1) a deterministic completion request
+        // over the exact IPC path the Monaco provider uses, whose labels are
+        // written to disk, and (2) the visible suggest widget for a screenshot.
+        if (/\.(cpp|cc|cxx|c|h|hpp)$/i.test(file)) {
+          await wait(2800) // clangd initialize + index
+          await js(`(() => {
+            const ed = window.__cortexEditor
+            if (!ed) return
+            ed.setPosition({ lineNumber: 25, column: 100 })
+            ed.trigger('kb', 'type', { text: '\\n    tempFilter.' })
+          })()`)
+          await wait(1800) // didChange debounce (300ms) + clangd reparse
+          const uri = 'file:///' + file.replace(/\\/g, '/')
+          const labels = await js(`(async () => {
+            const root = window.__cortexStore.getState().workspaceRoot
+            const res = await window.api.lspRequest({
+              lang: 'cpp', root,
+              method: 'textDocument/completion',
+              params: { textDocument: { uri: ${JSON.stringify(uri)} }, position: { line: 25, character: 15 } }
+            })
+            const items = Array.isArray(res) ? res : (res && res.items) || []
+            return items.map((i) => i.label)
+          })()`)
+          await writeFile(join(dir, 'lsp-completion.json'), JSON.stringify(labels, null, 2))
+          // Hover over MovingAverage (line 25) for a second, stable visual proof.
+          const hover = await js(`(async () => {
+            const root = window.__cortexStore.getState().workspaceRoot
+            const res = await window.api.lspRequest({
+              lang: 'cpp', root,
+              method: 'textDocument/hover',
+              params: { textDocument: { uri: ${JSON.stringify(uri)} }, position: { line: 24, character: 6 } }
+            })
+            const c = res && res.contents
+            return typeof c === 'string' ? c : (c && c.value) || (Array.isArray(c) ? JSON.stringify(c) : null)
+          })()`)
+          await writeFile(join(dir, 'lsp-hover.json'), JSON.stringify(hover, null, 2))
+          // Proof the Monaco providers are live: which servers are available and
+          // whether this document is registered (the completion/hover providers
+          // key off exactly this registration).
+          const lspState = await js(`window.__cortexLsp ? { available: window.__cortexLsp.available(), openDocs: window.__cortexLsp.openDocs() } : null`)
+          await writeFile(join(dir, 'lsp-state.json'), JSON.stringify(lspState, null, 2))
+          try {
+            win.focus()
+            win.webContents.focus()
+          } catch {
+            /* offscreen focus is best-effort */
+          }
+          // Visible suggest widget: focus the editor first (store manipulation
+          // above can steal focus, and Monaco anchors the widget to the focused
+          // editor), then snap while it is still open.
+          await js(`(() => {
+            const ed = window.__cortexEditor
+            if (!ed) return
+            ed.focus()
+            ed.setPosition({ lineNumber: 26, column: 16 })
+            ed.trigger('kb', 'editor.action.triggerSuggest', {})
+          })()`)
+          await wait(1200) // completion round-trip + widget render
+          // Read the suggest-widget DOM directly: this proves the Monaco provider
+          // (not just direct IPC) rendered clangd's items on screen, independent
+          // of whether the offscreen capture composites the overlay layer.
+          const widget = await js(`(() => {
+            const w = document.querySelector('.monaco-editor .suggest-widget')
+            const visible = !!(w && w.classList.contains('visible'))
+            const rows = w ? [...w.querySelectorAll('.monaco-list-row')].map((r) => r.textContent.trim()).slice(0, 10) : []
+            return { visible, rows }
+          })()`)
+          await writeFile(join(dir, 'lsp-widget.json'), JSON.stringify(widget, null, 2))
+          await snap('03f-lsp-completion')
+        }
+        // Open a menu so the bar and a dropdown are both captured.
+        await js(`(() => {
+          const b = [...document.querySelectorAll('button')].find((x) => x.textContent === 'Sketch')
+          if (b) b.click()
+        })()`)
+        await wait(400)
+        await snap('03b-menu')
+        await js(`document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))`)
+        await wait(200)
+        // Prove a menu item actually acts, from a CLOSED panel (the earlier bug
+        // was a stale-read toggle that re-closed it): Tools > Serial Plotter must
+        // open the bottom serial panel in plot mode.
+        await js(`window.__cortexStore.setState({ bottomVisible: false })`)
+        await wait(150)
+        await js(`(() => {
+          const t = [...document.querySelectorAll('button')].find((x) => x.textContent === 'Tools')
+          if (t) t.click()
+        })()`)
+        await wait(250)
+        await js(`(() => {
+          const p = [...document.querySelectorAll('button')].find((x) => x.textContent === 'Serial Plotter')
+          if (p) p.click()
+        })()`)
+        await wait(500)
+        await snap('03c-plotter')
+        // Force board-ready state so the circular Verify/Upload toolbar shows
+        // (arduino-cli is not installed on the capture machine).
+        await js(`window.__cortexStore.setState({ boardStatus: { available: true, version: '1.0.0' }, selectedFqbn: 'arduino:avr:uno' })`)
+        await wait(500)
+        await snap('03d-toolbar-board')
+        await js(`window.__cortexStore.setState({ boardStatus: null, selectedFqbn: '' })`)
+        await wait(200)
+        // Help > About: verifies the appInfo fetch and the modal end to end.
+        await js(`(() => {
+          const h = [...document.querySelectorAll('button')].find((x) => x.textContent === 'Help')
+          if (h) h.click()
+        })()`)
+        await wait(250)
+        await js(`(() => {
+          const a = [...document.querySelectorAll('button')].find((x) => x.textContent === 'About Cortex')
+          if (a) a.click()
+        })()`)
+        await wait(700)
+        await snap('03e-about')
+        await js(`(() => {
+          const c = [...document.querySelectorAll('button')].find((x) => x.textContent === 'Close')
+          if (c) c.click()
+        })()`)
+        await wait(200)
+      }
+      await js(`window.__cortexStore.getState().setMainView('simulator')`)
+      await wait(1500)
+      await snap('04-simulator')
+      // 3D board view. The toggle is local component state, so drive it through
+      // the DOM the way a user would, then let WebGL paint a couple of frames.
+      await js(`(() => {
+        const btn = [...document.querySelectorAll('button')].find((b) => b.title === '3D board view')
+        if (btn) btn.click()
+      })()`)
+      await wait(2500)
+      await snap('04b-sim-3d')
+      // Each 3D board model.
+      await js(`window.__cortexStore.getState().setSim3dBoard('esp32')`)
+      await wait(1800)
+      await snap('04c-sim-3d-esp32')
+      await js(`window.__cortexStore.getState().setSim3dBoard('pi')`)
+      await wait(1800)
+      await snap('04d-sim-3d-pi')
+      await js(`window.__cortexStore.getState().setSim3dBoard('uno')`)
+      // A multi-pin part (RGB) to show its per-pin 3D connectors.
+      await js(`window.__cortexStore.getState().addPart('rgb')`)
+      await wait(1500)
+      // Re-assert the view: the board-switch Canvas remount plus a rapid addPart
+      // can race the snapshot into a stale frame in the harness.
+      await js(`window.__cortexStore.getState().setMainView('simulator')`)
+      await wait(300)
+      await snap('04e-sim-3d-multipin')
+      await js(`(() => {
+        const btn = [...document.querySelectorAll('button')].find((b) => b.title === '2D schematic view')
+        if (btn) btn.click()
+      })()`)
+      await wait(400)
+      // Prove the panels are resizable (splitters drive these same setters).
+      await js(`window.__cortexStore.getState().setMainView('editor')`)
+      await js(`window.__cortexStore.getState().setSidebarWidth(420)`)
+      await js(`window.__cortexStore.getState().setAiWidth(280)`)
+      await js(`window.__cortexStore.getState().setBottomHeight(140)`)
+      await wait(1200)
+      await snap('05-panels-resized')
+
+      // Small-window passes. Overflow, clipping, and collisions only appear
+      // when the layout is starved, and every panel open at 1000x680 is the
+      // worst realistic case: a laptop user with the AI panel docked.
+      win.setSize(1000, 680)
+      await wait(1200)
+      await snap('06-small-editor')
+      await js(`window.__cortexStore.getState().setMainView('simulator')`)
+      await wait(1200)
+      await snap('07-small-simulator')
+      await js(`window.__cortexStore.getState().setBottom('problems')`)
+      await wait(800)
+      await snap('08-small-problems')
+    }
+  } catch (err) {
+    console.error('[cortex] capture failed:', err)
+  }
+  app.quit()
+}
+
+function registerIpc(): void {
+  // ---- dialogs ----
+  ipcMain.handle(IPC.DIALOG_OPEN_FOLDER, async () => {
+    const res = await dialog.showOpenDialog(requireWindow(), { properties: ['openDirectory'] })
+    return res.canceled ? null : res.filePaths[0]
+  })
+  ipcMain.handle(IPC.DIALOG_OPEN_FILE, async () => {
+    const res = await dialog.showOpenDialog(requireWindow(), { properties: ['openFile'] })
+    return res.canceled ? null : res.filePaths[0]
+  })
+
+  // ---- filesystem ----
+  ipcMain.handle(IPC.FS_READ_DIR, (_e, p: string) => fsService.readDir(p))
+  ipcMain.handle(IPC.FS_LIST_ALL, (_e, p: string) => fsService.listAllFiles(p))
+  ipcMain.handle(IPC.FS_SEARCH, (_e, q: SearchQuery) => search.searchInFiles(q))
+  ipcMain.handle(IPC.FS_READ_FILE, (_e, p: string) => fsService.readFile(p))
+  ipcMain.handle(IPC.FS_EXISTS, (_e, p: string) => fsService.exists(p))
+  ipcMain.handle(IPC.FS_WRITE_FILE, (_e, p: string, c: string) => fsService.writeFile(p, c))
+  ipcMain.handle(IPC.FS_CREATE_FILE, (_e, p: string) => fsService.createFile(p))
+  ipcMain.handle(IPC.FS_CREATE_DIR, (_e, p: string) => fsService.createDir(p))
+  ipcMain.handle(IPC.FS_RENAME, (_e, a: string, b: string) => fsService.rename(a, b))
+  ipcMain.handle(IPC.FS_DELETE, (_e, p: string) => fsService.remove(p))
+  ipcMain.handle(IPC.FS_WATCH_START, (_e, p: string) => fsService.startWatch(p, requireWindow()))
+  ipcMain.handle(IPC.FS_WATCH_STOP, () => fsService.stopWatch())
+
+  // ---- toolchains ----
+  ipcMain.handle(IPC.TOOLCHAIN_DETECT, (_e, force?: boolean) => toolchain.detectToolchains(force))
+
+  // ---- run / build ----
+  ipcMain.handle(IPC.RUN_START, (_e, req: RunRequest) => runner.startRun(requireWindow(), req))
+  ipcMain.handle(IPC.RUN_STOP, (_e, id: string) => runner.stopRun(id))
+  ipcMain.handle(IPC.RUN_INPUT, (_e, id: string, data: string) => runner.sendInput(id, data))
+
+  // ---- serial ----
+  ipcMain.handle(IPC.SERIAL_LIST, () => serial.listPorts())
+  ipcMain.handle(IPC.SERIAL_OPEN, (_e, opts: SerialOpenOptions) => serial.openPort(requireWindow(), opts))
+  ipcMain.handle(IPC.SERIAL_CLOSE, () => serial.closePort())
+  ipcMain.handle(IPC.SERIAL_WRITE, (_e, data: string) => serial.writePort(data))
+
+  // ---- language servers (LSP) ----
+  // `root` comes from the renderer and drives privileged sinks (spawn cwd, the
+  // .clangd write, the .cortex/config.json read), so confine it to the open
+  // workspace exactly as file writes are, before dispatching.
+  ipcMain.handle(IPC.LSP_SERVERS, (_e, refresh?: boolean) => lsp.availableServers(refresh))
+  ipcMain.handle(IPC.LSP_REQUEST, (_e, call: LspCall) =>
+    fsService.withinWorkspace(call.root) ? lsp.request(requireWindow(), call) : Promise.resolve(null)
+  )
+  ipcMain.handle(IPC.LSP_NOTIFY, (_e, call: LspCall) => {
+    if (fsService.withinWorkspace(call.root)) lsp.notify(requireWindow(), call)
+  })
+  // Tearing down other roots' servers is not a privileged sink (no spawn/write),
+  // so it is not gated; it only frees processes for an abandoned workspace.
+  ipcMain.handle(IPC.LSP_DISPOSE_ROOT, (_e, keepRoot: string) => lsp.disposeExcept(keepRoot))
+
+  // ---- ai ----
+  ipcMain.handle(IPC.AI_COMPLETE, (_e, req: AiRequest) => ai.complete(requireWindow(), req))
+
+  // ---- project config ----
+  ipcMain.handle(IPC.PROJECT_CONFIG_GET, (_e, root: string) => projectConfig.getProjectConfig(root))
+  ipcMain.handle(IPC.PROJECT_CONFIG_SET, (_e, root: string, patch: ProjectConfig) =>
+    projectConfig.setProjectConfig(root, patch)
+  )
+
+  // ---- embedded boards ----
+  ipcMain.handle(IPC.BOARD_STATUS, () => embedded.status())
+  ipcMain.handle(IPC.BOARD_LIST_CONNECTED, () => embedded.listConnected())
+  ipcMain.handle(IPC.BOARD_LIST_ALL, () => embedded.listAll())
+  ipcMain.handle(IPC.BOARD_COMPILE, (_e, req: BoardCompileRequest) => embedded.compile(requireWindow(), req))
+  ipcMain.handle(IPC.BOARD_UPLOAD, (_e, req: BoardUploadRequest) => embedded.upload(requireWindow(), req))
+
+  // ---- Boards Manager (cores) + Library Manager ----
+  ipcMain.handle(IPC.CORE_SEARCH, (_e, q: string) => pkg.coreSearch(q))
+  ipcMain.handle(IPC.CORE_INSTALLED, () => pkg.coreInstalled())
+  ipcMain.handle(IPC.CORE_INSTALL, (_e, req: PackageInstallRequest) => pkg.coreInstall(requireWindow(), req))
+  ipcMain.handle(IPC.CORE_UNINSTALL, (_e, id: string, coreId: string) => pkg.coreUninstall(requireWindow(), id, coreId))
+  ipcMain.handle(IPC.CORE_UPDATE_INDEX, (_e, id: string) => pkg.coreUpdateIndex(requireWindow(), id))
+  ipcMain.handle(IPC.LIB_SEARCH, (_e, q: string) => pkg.libSearch(q))
+  ipcMain.handle(IPC.LIB_INSTALLED, () => pkg.libInstalled())
+  ipcMain.handle(IPC.LIB_INSTALL, (_e, req: PackageInstallRequest) => pkg.libInstall(requireWindow(), req))
+  ipcMain.handle(IPC.LIB_UNINSTALL, (_e, id: string, name: string) => pkg.libUninstall(requireWindow(), id, name))
+
+  // ---- simulator ----
+  ipcMain.handle(IPC.SIM_START, (_e, req: SimStartRequest) => sim.start(requireWindow(), req))
+  ipcMain.handle(IPC.SIM_STOP, (_e, id: string) => sim.stop(id))
+  ipcMain.handle(IPC.SIM_INPUT, (_e, id: string, pin: number, value: number) => sim.input(id, pin, value))
+
+  // ---- debugger (gdb) ----
+  ipcMain.handle(IPC.DEBUG_START, (_e, req: DebugStartRequest) => debug.start(requireWindow(), req))
+  ipcMain.handle(IPC.DEBUG_STOP, () => debug.stop())
+  ipcMain.handle(IPC.DEBUG_CONTINUE, () => debug.cont())
+  ipcMain.handle(IPC.DEBUG_STEP_OVER, () => debug.stepOver())
+  ipcMain.handle(IPC.DEBUG_STEP_INTO, () => debug.stepInto())
+  ipcMain.handle(IPC.DEBUG_STEP_OUT, () => debug.stepOut())
+  ipcMain.handle(IPC.DEBUG_PAUSE, () => debug.pause())
+  ipcMain.handle(IPC.DEBUG_SELECT_FRAME, (_e, level: number) => debug.selectFrame(level))
+  ipcMain.handle(IPC.DEBUG_SET_BREAKPOINTS, (_e, file: string, lines: number[]) => debug.setBreakpoints(file, lines))
+  ipcMain.handle(IPC.DEBUG_EVALUATE, (_e, expr: string) => debug.evaluate(expr))
+
+  // ---- settings / app ----
+  // Return redacted settings only: the raw API key never crosses to the renderer.
+  ipcMain.handle(IPC.SETTINGS_GET, () => settings.getPublicSettings())
+  ipcMain.handle(IPC.SETTINGS_SET, (_e, patch) => settings.setSettings(patch))
+  ipcMain.handle(IPC.APP_INFO, (): AppInfo => ({
+    version: app.getVersion(),
+    platform: process.platform,
+    arch: process.arch,
+    home: homedir(),
+    electron: process.versions.electron,
+    node: process.versions.node,
+    chrome: process.versions.chrome
+  }))
+}
+
+app.whenReady().then(() => {
+  // Apply a strict Content-Security-Policy in production. In dev we leave it to
+  // Electron so Vite HMR (websocket) and the React Fast Refresh preamble work.
+  if (!process.env['ELECTRON_RENDERER_URL']) {
+    session.defaultSession.webRequest.onHeadersReceived((details, cb) => {
+      cb({
+        responseHeaders: {
+          ...details.responseHeaders,
+          'Content-Security-Policy': [
+            "default-src 'self'; script-src 'self'; worker-src 'self' blob:; " +
+              "style-src 'self' 'unsafe-inline'; font-src 'self' data:; " +
+              "img-src 'self' data:; connect-src 'self'"
+          ]
+        }
+      })
+    })
+  }
+
+  registerIpc()
+  createWindow()
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  })
+})
+
+app.on('window-all-closed', () => {
+  runner.killAll()
+  sim.killAll()
+  debug.stop()
+  lsp.killAll()
+  fsService.stopWatch()
+  void serial.closePort()
+  if (process.platform !== 'darwin') app.quit()
+})
+
+app.on('before-quit', () => {
+  runner.killAll()
+  sim.killAll()
+  debug.stop()
+  lsp.killAll()
+})

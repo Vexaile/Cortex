@@ -1,0 +1,199 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+  }
+
+  body {
+    background-color: #0c1017;
+    color: #e6ebf4;
+    font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+  }
+
+  /* Chrome is not selectable, but content is. Without this you cannot copy a
+     compiler error, serial line, or AI answer out of your own IDE. */
+  .mono,
+  pre,
+  code,
+  input,
+  textarea,
+  [contenteditable] {
+    user-select: text;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #2b3444;
+    border-radius: 5px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #3a4557;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center gap-1.5 rounded px-2 py-1 text-ide-text transition-colors;
+  }
+  /* Gate hover on :not(:disabled): a disabled button that lights up on hover
+     reads as clickable. And make disabled look disabled everywhere, rather than
+     relying on each call site to remember disabled:opacity-40. */
+  .btn:hover:not(:disabled) {
+    @apply bg-ide-hover;
+  }
+  .btn:disabled {
+    @apply cursor-not-allowed opacity-40;
+  }
+  /* Keyboard users need a visible focus ring; outline-none is used liberally. */
+  .btn:focus-visible,
+  button:focus-visible,
+  select:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible {
+    @apply outline-none ring-2 ring-ide-accent ring-offset-1 ring-offset-ide-bg;
+  }
+  .btn-accent {
+    @apply bg-ide-accent text-white;
+  }
+  .btn-accent:hover {
+    @apply brightness-110 bg-ide-accent;
+  }
+  .row {
+    @apply flex items-center;
+  }
+
+  /* For strips that must stay exactly one control tall (tab bars, toolbars).
+     They scroll rather than clip when starved, but a visible scrollbar inside
+     a 32px bar eats the row it is meant to protect. */
+  .scrollbar-none {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Panels are narrower than the window (the sidebar and AI panel take their
+   share), so a bar must respond to its own container, not the viewport. Mark
+   the bar `cq`, mark droppable text inside it `cq-label`, and below the
+   threshold the icons carry the controls on their own.
+
+   Scrolling alone was not enough: with the scrollbar hidden, Problems went out
+   of sight with nothing to tell the user it was still there. Anything marked
+   cq-label needs a title on its control so the icon stays identifiable. */
+.cq {
+  container-type: inline-size;
+}
+@container (max-width: 420px) {
+  .cq-label {
+    display: none;
+  }
+}
+
+.mono {
+  font-family: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+}
+
+/* Loading splash. The logo breathes: scales up and eases back to its own size,
+   the way Arduino's does. The glow behind it pulses on the same clock but
+   wider, so the light swells with the logo instead of tracking its edges. */
+@keyframes cortex-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.06);
+  }
+}
+@keyframes cortex-glow {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.28);
+  }
+}
+/* Indeterminate loader: a short highlight sweeps across the track. */
+@keyframes cortex-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+.cortex-breathe {
+  animation: cortex-breathe 2.8s ease-in-out infinite;
+  will-change: transform;
+}
+.cortex-glow {
+  animation: cortex-glow 2.8s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+.cortex-sweep {
+  animation: cortex-sweep 1.4s ease-in-out infinite;
+}
+
+/* Motion is decorative here, so honour the OS setting: hold the resting state. */
+@media (prefers-reduced-motion: reduce) {
+  .cortex-breathe,
+  .cortex-glow,
+  .cortex-sweep {
+    animation: none;
+  }
+}
+
+/* Draggable title bar region for the frameless-ish window */
+.drag {
+  -webkit-app-region: drag;
+}
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* Debugger gutter + current line. Monaco applies these classes to glyph-margin
+   and whole-line decoration elements. */
+.cortex-bp {
+  background-image: radial-gradient(#e5484d 42%, transparent 45%);
+  background-size: 13px 13px;
+  background-position: center;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+.cortex-debug-arrow {
+  background-image: radial-gradient(#e8b44a 42%, transparent 45%);
+  background-size: 13px 13px;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+.cortex-debug-line {
+  background: rgba(232, 180, 74, 0.13);
+}

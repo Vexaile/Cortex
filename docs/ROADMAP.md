@@ -1,0 +1,83 @@
+# Roadmap
+
+Phased plan from the current foundation (v0.1) toward the full "Cursor for Embedded Systems" vision.
+
+## ✅ Phase 0 - Foundation (v0.1, done)
+The runnable core:
+- Electron + React + TS + Vite + Tailwind + Monaco shell
+- Workspace explorer, tabbed editor, bottom panel, status bar, AI panel
+- Toolchain detection
+- Compile & run C/C++ (C++11 to C++23), Python, JS with streamed output
+- Serial monitor + live plotter
+- AI panel (provider-agnostic) with embedded-tuned prompt
+- Settings persistence, production CSP, packaging config
+
+## ✅ Phase 1 - Build UX, boards & simulator (v0.2, done)
+- Per-project **run configuration** (compiler, std, optimization, board) saved to `.cortex/config.json`
+- **Compiler diagnostics** → Problems panel (click-to-jump) + inline Monaco markers
+- **stdin** to running programs; optimization-level selector
+- **Board support** via arduino-cli: detect, list connected/installable, Verify + Upload `.ino`
+  sketches to ESP32 / RP2040 / Arduino (real Arduino APIs like `digitalWrite` work)
+- **Simulator MVP** (Wokwi/Tinkercad-style, native engine): virtual Uno, interactive LED/button/
+  buzzer, live serial - runs the user's real sketch with no hardware. See [`SIMULATOR.md`](SIMULATOR.md).
+
+## ✅ Phase 1.x - Polish, security, richer sim (v0.3, done)
+- New **Cortex Dark theme** (navy/amber/moss signature gradient); see [`THEME.md`](THEME.md)
+- **Rust** run (rustc); AI is provider-agnostic: Anthropic, OpenAI, **Gemini**, local, custom
+- **Command palette** (Ctrl+Shift+P) + **quick-open** (Ctrl+P); **file-tree context menu**
+  (new/rename/delete/copy path)
+- **Security**: AI key encrypted at rest (safeStorage) and never sent to the renderer; single-instance
+  lock + global error handlers; spawn **command allowlist**; destructive FS ops **confined to the
+  workspace**
+- **2D SVG simulator canvas**: drag parts, per-pin click-to-wire, **multi-pin components** (RGB LED
+  with live color mixing, **7-segment** display), analog sensors (pot / photoresistor / temperature),
+  buzzer, servo; **diagram save/load** to `.cortex/diagram.json`; demo sketches in `examples/sim/`
+- **Testing + CI**: 44 Vitest unit tests; GitHub Actions (typecheck + test + build on Ubuntu + Windows)
+
+## 🔜 Phase 1.5 - Real project builds & distribution
+- **Code signing** + notarization; **auto-update** (electron-updater)
+- **Multi-file** C/C++ builds via CMake + Ninja
+- **PlatformIO** project support
+- Board/core **manager** (one-click install of ESP32/AVR/RP2040 cores)
+- Include paths / defines in run configuration
+- More sim parts (OLED SSD1306, NeoPixel, HC-SR04, LCD1602); cycle-accurate engine (avr8js / rp2040js)
+- **Multi-file** C/C++ builds via CMake + Ninja
+- **PlatformIO** project support
+- Board/core **manager** (one-click install of ESP32/AVR/RP2040 cores)
+- Include paths / defines in run configuration
+
+## 🔜 Phase 2 - Language intelligence
+- **LSP integration**: clangd (C/C++), pyright (Python), rust-analyzer (Rust)
+- Cross-file completion, hover, go-to-definition, rename, diagnostics
+- Formatting (clang-format, black, rustfmt)
+- Global search/replace, symbol search
+
+## 🔜 Phase 3 - Debugging
+- GDB/LLDB integration (DAP): breakpoints, watch, call stack, threads
+- Registers, memory, disassembly views
+- On-chip debug via OpenOCD / J-Link / ST-Link
+
+## 🔜 Phase 4 - Hardware awareness
+- GPIO inspector, memory viewer, register viewer, RTOS (FreeRTOS) viewer
+- Richer serial: hex/CSV modes, regex filters, multi-port, export
+- Logic-analyzer / I²C / SPI decoding via plugins
+
+## 🔜 Phase 5 - AI-native workflow
+- Agentic multi-file edits (apply diffs), repo-wide context
+- Datasheet ingestion + Q&A; schematic image analysis
+- MCP tool integrations (flash the board, read registers, run the Python test suite)
+- Power/timing analysis agents with concrete estimates
+
+## 🔜 Phase 6 - Ecosystem
+- Board manager (one-click ESP32/STM32/RP2040/AVR/nRF52/Teensy/MSP430/PIC)
+- Plugin/extension system (VSCode-style): Zephyr, ESP-IDF, STM32Cube, ROS2, LVGL, OpenCV
+- Auto-update, telemetry opt-in, crash reporting
+
+## 🧭 Phase 7 (optional) - Tauri backend migration
+The IPC contract in `src/shared/ipc.ts` is intentionally backend-agnostic. A Rust/Tauri backend can
+implement the same channels for a much smaller, lower-RAM binary - attractive to the embedded
+audience. See [`TECH-STACK.md`](TECH-STACK.md) for the Electron-vs-Tauri rationale.
+
+**Migration approach:** keep the renderer unchanged; reimplement each `window.api.*` call as a Tauri
+command (fs, toolchain detect, run/compile, serial, AI). Ship Electron and Tauri side-by-side until
+the Tauri backend reaches parity.
