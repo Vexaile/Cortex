@@ -4,16 +4,15 @@ import { useStore } from '../store/useStore'
 import PanelHeader from './PanelHeader'
 import EmptyState from './EmptyState'
 import type { FileNode } from '@shared/ipc'
-import { langFromPath } from '@shared/languages'
+import FileIcon from './FileIcon'
 
 const parentDir = (p: string): string => p.replace(/[\\/][^\\/]+$/, '')
 
-function FileIcon({ node }: { node: FileNode }): JSX.Element {
+function TreeIcon({ node }: { node: FileNode }): JSX.Element {
   // Folders already show a chevron for expand state; a second arrow here read as
-  // a duplicate. Use a folder glyph instead, and a language-colored dot for files.
+  // a duplicate. Use a folder glyph instead, and the real per-language mark for files.
   if (node.isDir) return <Folder size={14} className="text-ide-amber" />
-  const color = langFromPath(node.path).color
-  return <span style={{ color }}>●</span>
+  return <FileIcon path={node.path} size={14} />
 }
 
 type OnContext = (x: number, y: number, node: FileNode) => void
@@ -57,8 +56,8 @@ function TreeRow({ node, depth, onContext }: { node: FileNode; depth: number; on
         ) : (
           <span className="w-[14px]" />
         )}
-        <span className="w-3 text-center text-[10px]">
-          <FileIcon node={node} />
+        <span className="flex w-[14px] shrink-0 items-center justify-center">
+          <TreeIcon node={node} />
         </span>
         <span className="truncate">{node.name}</span>
       </button>

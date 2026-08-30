@@ -31,6 +31,12 @@ The other real difference is that nothing is bundled or hidden. Cortex doesn't s
 
 This is an early, actively developed project, not a finished product. C++23 compiling, the simulator, and the Arduino compatibility shim are the parts that have actually been run and verified end to end. Code intelligence, the AI assistant, and the simulator's accuracy are all real but limited in scope right now, and the packaged build isn't signed or auto-updating yet. The `docs/` folder, especially `PRODUCTION-READINESS.md`, is deliberately upfront about what's solid and what still needs work.
 
+## Download
+
+Prebuilt installers for Windows, macOS, and Linux are published on the [Releases page](https://github.com/Blasted-ctrl/Cortex/releases).
+
+One honest caveat: the build isn't code-signed yet, so on Windows you'll hit a SmartScreen "unrecognized app" prompt on first launch. Click "More info" then "Run anyway." A signed, notarized build is on the list, just not there yet.
+
 ## Getting started
 
 ```bash
@@ -38,7 +44,7 @@ npm install
 npm run dev
 ```
 
-That launches the IDE in development mode with hot reload. To build a distributable app:
+That launches the IDE in development mode with hot reload. To build a distributable app yourself instead of downloading one:
 
 ```bash
 npm run build

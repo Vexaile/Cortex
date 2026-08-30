@@ -2,7 +2,7 @@ import { X, Circle, FileCode2, FileWarning } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import CodeEditor from './CodeEditor'
 import EmptyState from './EmptyState'
-import { langFromPath } from '@shared/languages'
+import FileIcon from './FileIcon'
 
 export default function EditorArea(): JSX.Element {
   const { tabs, activePath, setActive, closeTab } = useStore()
@@ -15,7 +15,6 @@ export default function EditorArea(): JSX.Element {
         {tabs.map((tab) => {
           const active = tab.path === activePath
           const dirty = tab.content !== tab.savedContent
-          const color = langFromPath(tab.path).color
           return (
             // The tab is a wrapper, not the control: the selectable part and
             // the close button are siblings. Making the whole tab a <button>
@@ -35,8 +34,8 @@ export default function EditorArea(): JSX.Element {
                 title={tab.path}
                 className="row h-full min-w-0 flex-1 cursor-pointer gap-1.5 pl-3 pr-1 text-left"
               >
-                <span className="shrink-0 text-[9px]" style={{ color }}>
-                  ●
+                <span className="flex shrink-0 items-center">
+                  <FileIcon path={tab.path} size={13} />
                 </span>
                 <span className="truncate">{tab.name}</span>
               </button>

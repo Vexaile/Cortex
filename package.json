@@ -17,7 +17,8 @@
     "start": "electron-vite preview",
     "dist": "electron-vite build && electron-builder",
     "dist:win": "electron-vite build && electron-builder --win",
-    "dist:dir": "electron-vite build && electron-builder --dir"
+    "dist:dir": "electron-vite build && electron-builder --dir",
+    "release": "electron-vite build && electron-builder --publish always"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",

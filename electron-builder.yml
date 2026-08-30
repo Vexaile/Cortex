@@ -33,4 +33,9 @@ linux:
     - AppImage
     - deb
   category: Development
-npmRebuild: true
+npmRebuild: false
+publish:
+  provider: github
+  owner: Blasted-ctrl
+  repo: Cortex
+  releaseType: release
