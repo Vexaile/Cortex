@@ -33,7 +33,7 @@ This is an early, actively developed project, not a finished product. C++23 comp
 
 ## Download
 
-Prebuilt installers for Windows, macOS, and Linux are published on the [Releases page](https://github.com/Blasted-ctrl/Cortex/releases).
+Prebuilt installers for Windows, macOS, and Linux are published on the [Releases page](https://github.com/Vexaile/Cortex/releases).
 
 One honest caveat: the build isn't code-signed yet, so on Windows you'll hit a SmartScreen "unrecognized app" prompt on first launch. Click "More info" then "Run anyway." A signed, notarized build is on the list, just not there yet.
 

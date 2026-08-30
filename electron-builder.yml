@@ -36,6 +36,6 @@ linux:
 npmRebuild: false
 publish:
   provider: github
-  owner: Blasted-ctrl
+  owner: Vexaile
   repo: Cortex
   releaseType: release
