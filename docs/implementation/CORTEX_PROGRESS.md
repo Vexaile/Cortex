@@ -3,6 +3,47 @@
 Newest first. One entry per completed slice: what shipped, how it was verified,
 and what it unblocks. See `CORTEX_IMPLEMENTATION_PLAN.md` for the full plan.
 
+## Intelligent Dependency & Environment System: foundation (Stage 1)
+
+Kicked off the initiative to turn package handling from a thin arduino-cli UI
+into an intelligence layer over the ecosystem. First a parallel inspection
+mapped the five subsystems it must extend (packages/boards, build/toolchain,
+project+hardware model, simulator, renderer/store/agent), confirming: two flows
+that never talk (arduino-cli package management vs the derived ProjectModel/
+hardware graph), no dependency resolution/lock/manifest, no compatibility
+reasoning, and the audit's real graph-vs-simulator mismatch. That grounded the
+design of record, `docs/implementation/INTELLIGENT_DEPENDENCY_SYSTEM.md` (goals,
+non-goals, architecture, data model, honesty-tiered resolution, failure states,
+UI, AI, security, caching, reproducibility, testing, extension points, and an
+8-slice order).
+
+Stage-1 foundation shipped: `src/shared/environment.ts`, a pure, dependency-free
+`reconcileEnvironment` engine that composes what the project declares/uses
+(#include headers) against what is installed (cores/libraries) and the selected
+board, into an evidence-based `EnvironmentReport` (core-installed status,
+per-header dependency tiers, update risk from real semver deltas, and ordered
+findings with structured install/update suggestions). Its governing rule is
+honesty: it only claims what it can prove. A header is `resolved` (an installed
+library declares it provides it), `provided-by-toolchain` (a curated set proven
+universal across every target), or `unverified` (cannot prove a provider - a
+build confirms); it never emits a static `missing`, which would be a false
+positive for a core-bundled or new header.
+
+A 2-dimension adversarial review (15 agents) found a real class of honesty
+violations, all fixed: the toolchain set over-claimed on AVR (the C++ STL and
+`EEPROM.h` and several libc headers avr-libc lacks are not universal, so
+`<vector>` on an Uno was a false green) - the set is now the proven intersection
+across cores and the STL/EEPROM fall to `unverified`; the classifier now checks
+the library provider first (fixing an ordering bug) and only basename-matches a
+header one library provides (no cross-attribution); an empty `installedVersion`
+(arduino-cli's not-installed sentinel) no longer reads as installed; when
+arduino-cli itself is unavailable the engine reports that rather than a wrong
+"install this core"; and `usedAt` de-dupes. The design doc's minor divergences
+(a static `missing` tier, the parallel-input-contract vs extend-DTOs principle,
+`provides_includes` tracking, a security claim, the cache key) were corrected too.
+24 unit tests; typecheck and full suite green. No UI yet: the gatherer service +
+Dependencies/Environment panel are the next slice.
+
 ## Senior-engineer operating manual as the AI system prompt (Phase 3)
 
 The agent and the chat assistant had short, generic system prompts. Both now run
