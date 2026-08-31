@@ -3,6 +3,40 @@
 Newest first. One entry per completed slice: what shipped, how it was verified,
 and what it unblocks. See `CORTEX_IMPLEMENTATION_PLAN.md` for the full plan.
 
+## Split / draggable editor tabs (Phase 1)
+
+The requested feature: with two files open, drag a tab to the side to view both
+side by side (like VS Code / JetBrains / Visual Studio), and drag tabs to
+reorder. Implemented as two editor groups (panes). The layout logic is a pure,
+unit-tested module (`src/shared/editorGroups.ts`): each tab carries a group (0
+or 1); `resolve()` keeps the invariants (collapse the split when a group
+empties, cluster, repair each group's active tab, keep the active group
+non-empty), and open/focus/close/move/reorder are pure transitions. The store
+delegates to it; `openFile`, `setActive`, and `closeTab` are unchanged in
+behavior for the single-pane case. `EditorArea` renders one or two panes with a
+Splitter between them, HTML5 drag-and-drop (draggable tabs, an accent-tinted
+drop overlay, drag-to-edge to split), and a focus indicator on the active
+pane's tab. `CodeEditor` tracks editor focus so the format/rename actions target
+the focused pane.
+
+Verified live against EdgeInspect: opening main.cpp and main.py and moving one
+to the second group renders two Monaco editors side by side, each 480x327 with
+its own content; collapsing returns to a single editor. 18 editorGroups unit
+tests, workspaceReset guard extended, full suite green. Designed with the
+Taste-Skill (redesign-skill) honoring the existing dense IDE tokens, not a
+generic redesign.
+
+A 4-dimension adversarial review ran on the diff; all confirmed findings were
+fixed and re-verified live: renameEntry/deleteEntry now route through the group
+resolver (a renamed open file no longer blanks its pane; a deleted file no
+longer strands the active group or re-splits on the next open); dropping a tab
+onto an editor no longer injects the file path into the document (custom drag
+mime + Monaco drop-into-editor disabled); the unsaved-changes tab dot that the
+user had removed is not re-added; the focused editor now follows the active
+file so Format/Rename and Save target the same pane; the single-tab split
+affordance is gated so it is never a no-op; and reorder honors the pointer
+(before/after the target).
+
 ## Library member/class autocomplete + clangd include config (Phase 2)
 
 The reported gap: with ESP32Servo.h included, `Servo myservo; myservo.` offered

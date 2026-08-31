@@ -59,6 +59,8 @@ const WORKSPACE_SCOPED = [
   'expanded',
   'tabs',
   'activePath',
+  'activeGroup',
+  'groupActive',
   'reveal',
   'simParts',
   'simSerial',
@@ -156,6 +158,21 @@ describe('workspaceScopedReset', () => {
 
     it('is awaited by openWorkspace, so the canvas never paints stale parts', () => {
       expect(SRC).toContain('await get().loadDiagram()')
+    })
+  })
+
+  // The panes render groupActive, not activePath, so any tab-set mutation must
+  // go through the group resolver or a pane can point at a stale/removed path.
+  // renameEntry and deleteEntry set tabs directly, so they must re-resolve.
+  describe('rename/delete reconcile the editor groups', () => {
+    it('renameEntry re-resolves the groups (so a renamed open file does not blank its pane)', () => {
+      const body = SRC.slice(SRC.indexOf('async renameEntry('), SRC.indexOf('async deleteEntry('))
+      expect(body).toContain('resolveGroups(')
+      expect(body).toContain('groupActive')
+    })
+    it('deleteEntry re-resolves the groups (so a deleted active tab does not strand activeGroup)', () => {
+      const body = SRC.slice(SRC.indexOf('async deleteEntry('), SRC.indexOf('async createNewFile('))
+      expect(body).toContain('resolveGroups(')
     })
   })
 

@@ -25,6 +25,23 @@ const IDLE_DEBUG: DebugState = { status: 'idle', stack: [], frame: 0, variables:
 import { extractSeries } from '@shared/serialPlot'
 import { isHostCpp, hostCppOrNull } from '@shared/security'
 import { freeSpawnPoint, clampToSpace, W as SIM_W, H as SIM_H, V1_SPACE } from '@shared/simLayout'
+import {
+  resolve as resolveGroups,
+  addTab as addTabToGroups,
+  focusPath as focusPathInGroups,
+  focusInGroup as focusPathInGroup,
+  focusGroup as focusGroupLayout,
+  removeTab as removeTabFromGroups,
+  moveTab as moveTabBetweenGroups,
+  reorderTab as reorderTabInGroup,
+  type ResolvedGroups
+} from '@shared/editorGroups'
+
+/** Spread only the store fields a group transition touches (drop the derived
+ *  `split` flag, which the UI recomputes). */
+function groupPatch(r: ResolvedGroups<Tab>): Pick<State, 'tabs' | 'activePath' | 'activeGroup' | 'groupActive'> {
+  return { tabs: r.tabs, activePath: r.activePath, activeGroup: r.activeGroup, groupActive: r.groupActive }
+}
 
 /** Languages Cortex builds before it runs, so the status bar shows "Compiling"
  * first. Python/JS go straight to 'run'. */
@@ -134,6 +151,8 @@ export function workspaceScopedReset(): Record<string, unknown> {
     // its write confinement on watchStart, so saving a carried tab is refused.
     tabs: [],
     activePath: null,
+    activeGroup: 0,
+    groupActive: {},
     reveal: null,
     // simulator
     simParts: defaultSimParts(),
@@ -202,6 +221,9 @@ export interface Tab {
    * never be dirtied and so can never be saved back over the original.
    */
   readOnlyReason?: string
+  /** Which editor group (pane) this tab lives in: 0 (left, default) or 1
+   *  (right, present only while the editor is split). See shared/editorGroups.ts. */
+  group: number
 }
 
 export interface OutputLine {
@@ -306,6 +328,12 @@ interface State {
   // editor
   tabs: Tab[]
   activePath: string | null
+  /** Which editor group has focus (0 or 1). activePath is always the active
+   *  tab of this group. */
+  activeGroup: number
+  /** The active tab path within each group, so both panes remember their
+   *  selection while the editor is split. */
+  groupActive: Record<number, string | null>
 
   // layout
   mainView: MainView
@@ -390,6 +418,16 @@ interface State {
   openFile: (path: string) => Promise<void>
   setActive: (path: string) => void
   closeTab: (path: string) => void
+  /** Focus a tab within a specific editor group (a tab-strip click). */
+  setActiveInGroup: (group: number, path: string) => void
+  /** Make an editor group the focused one (a click inside its pane). */
+  focusGroup: (group: number) => void
+  /** Move a tab into another editor group. Moving to group 1 when it does not
+   *  exist yet splits the editor; moving the last tab out of a group collapses
+   *  it. This is the drag-to-split action. */
+  moveTabToGroup: (path: string, group: number) => void
+  /** Reorder a tab within its own group (drag-to-reorder). */
+  reorderTab: (path: string, toIndex: number) => void
   updateContent: (path: string, content: string) => void
   /** Reflect a change made to a file outside the editor (e.g. a rename
    *  refactor that already rewrote it on disk): set the tab's content AND
@@ -583,6 +621,8 @@ export const useStore = create<State>((set, get) => ({
 
   tabs: [],
   activePath: null,
+  activeGroup: 0,
+  groupActive: {},
 
   mainView: 'editor',
   sim3dBoard: 'uno',
@@ -777,7 +817,8 @@ export const useStore = create<State>((set, get) => ({
     // (forward slashes, from gcc) focuses the existing tab instead of duplicating.
     const existing = tabs.find((t) => normPath(t.path) === normPath(path))
     if (existing) {
-      set({ activePath: existing.path })
+      // Focus it in whichever group already holds it.
+      set(groupPatch(focusPathInGroups(get(), existing.path)))
       return
     }
     const read = await window.api.readFile(path)
@@ -788,47 +829,53 @@ export const useStore = create<State>((set, get) => ({
         : read.kind === 'too-large'
           ? `This file is ${(read.size / (1024 * 1024)).toFixed(1)} MB, too large to open in the editor.`
           : undefined
-    const tab: Tab = {
-      path,
-      name: baseName(path),
-      content,
-      savedContent: content,
-      language: langFromPath(path),
-      readOnlyReason
-    }
     // Re-read tabs AFTER the await: the captured list is stale if another file
     // was opened while this read was in flight, which would drop that tab.
-    const current = get().tabs
-    const raced = current.find((t) => normPath(t.path) === normPath(path))
+    const raced = get().tabs.find((t) => normPath(t.path) === normPath(path))
     if (raced) {
       // Activate the tab's OWN path string. Consumers look tabs up with strict
       // equality, so activating a differently-spelled path (gcc's forward
       // slashes vs the explorer's backslashes) would blank the editor pane.
-      set({ activePath: raced.path })
+      set(groupPatch(focusPathInGroups(get(), raced.path)))
       return
     }
-    set({ tabs: [...current, tab], activePath: path })
+    // addTab assigns the tab to (and focuses) whichever group is active, so a
+    // file opened while the right pane has focus opens there.
+    set(
+      groupPatch(
+        addTabToGroups(get(), { path, name: baseName(path), content, savedContent: content, language: langFromPath(path), readOnlyReason })
+      )
+    )
   },
 
   setActive(path) {
-    set({ activePath: path })
+    set(groupPatch(focusPathInGroups(get(), path)))
+  },
+
+  setActiveInGroup(group, path) {
+    set(groupPatch(focusPathInGroup(get(), group, path)))
+  },
+
+  focusGroup(group) {
+    set(groupPatch(focusGroupLayout(get(), group)))
+  },
+
+  moveTabToGroup(path, group) {
+    set(groupPatch(moveTabBetweenGroups(get(), path, group)))
+  },
+
+  reorderTab(path, toIndex) {
+    set(groupPatch(reorderTabInGroup(get(), path, toIndex)))
   },
 
   closeTab(path) {
-    const { tabs, activePath } = get()
-    const closing = tabs.find((t) => t.path === path)
+    const closing = get().tabs.find((t) => t.path === path)
     // Guard against silent data loss on unsaved edits.
     if (closing && closing.content !== closing.savedContent) {
       const ok = window.confirm(`Discard unsaved changes to ${closing.name}?`)
       if (!ok) return
     }
-    const idx = tabs.findIndex((t) => t.path === path)
-    const next = tabs.filter((t) => t.path !== path)
-    let active = activePath
-    if (activePath === path) {
-      active = next.length ? next[Math.max(0, idx - 1)].path : null
-    }
-    set({ tabs: next, activePath: active })
+    set(groupPatch(removeTabFromGroups(get(), path)))
   },
 
   updateContent(path, content) {
@@ -888,14 +935,17 @@ export const useStore = create<State>((set, get) => ({
       }
       return t
     })
-    const active = get().activePath
-    const nextActive =
-      active && normPath(active) === normPath(path)
-        ? newPath
-        : active && normPath(active).startsWith(normPath(path) + '/')
-          ? newPath + active.slice(path.length)
-          : active
-    set({ tabs, activePath: nextActive })
+    // The panes render groupActive, not activePath, so the per-group active
+    // paths have to follow the rename too. Remap them (file and files under a
+    // renamed folder) and re-resolve so both panes point at the renamed tabs.
+    const remap = (p: string | null): string | null => {
+      if (!p) return p
+      if (normPath(p) === normPath(path)) return newPath
+      if (normPath(p).startsWith(normPath(path) + '/')) return newPath + p.slice(path.length)
+      return p
+    }
+    const groupActive = { 0: remap(get().groupActive[0] ?? null), 1: remap(get().groupActive[1] ?? null) }
+    set(groupPatch(resolveGroups({ tabs, activeGroup: get().activeGroup, groupActive })))
     await get().refreshTree()
   },
   async deleteEntry(path) {
@@ -903,11 +953,10 @@ export const useStore = create<State>((set, get) => ({
     const remaining = get().tabs.filter(
       (t) => normPath(t.path) !== normPath(path) && !normPath(t.path).startsWith(normPath(path) + '/')
     )
-    let active = get().activePath
-    if (active && !remaining.find((t) => t.path === active)) {
-      active = remaining.length ? remaining[remaining.length - 1].path : null
-    }
-    set({ tabs: remaining, activePath: active })
+    // Re-resolve so a deleted active tab, an emptied group, or a stale
+    // active-group index are all repaired (rather than resurfacing as a blank
+    // pane or a phantom re-split on the next open).
+    set(groupPatch(resolveGroups({ tabs: remaining, activeGroup: get().activeGroup, groupActive: get().groupActive })))
     await get().refreshTree()
   },
   async createNewFile(dir, name) {

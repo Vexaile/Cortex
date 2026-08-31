@@ -100,6 +100,7 @@ const norm = (p: string): string => p.toLowerCase().replace(/\\/g, '/')
 
 export default function CodeEditor({ path }: { path: string }): JSX.Element {
   const tabs = useStore((s) => s.tabs)
+  const activePath = useStore((s) => s.activePath)
   const updateContent = useStore((s) => s.updateContent)
   const runActive = useStore((s) => s.runActive)
   const saveActive = useStore((s) => s.saveActive)
@@ -190,6 +191,18 @@ export default function CodeEditor({ path }: { path: string }): JSX.Element {
     }
   }, [])
 
+  // Keep the "focused editor" the menu/format/rename actions drive pointed at
+  // whichever pane holds the active file, even when the group is switched
+  // without clicking into its editor text (e.g. from the Explorer). Without
+  // this, activePath (which Save/Run use) and __cortexEditor could disagree in
+  // a split, so Format would act on a different file than Save.
+  useEffect(() => {
+    const editor = editorRef.current
+    if (editor && activePath === path) {
+      ;(window as unknown as { __cortexEditor?: typeof editor }).__cortexEditor = editor
+    }
+  }, [activePath, path, mountNonce])
+
   // Jump to a location when the Problems panel requests a reveal for this file.
   useEffect(() => {
     const editor = editorRef.current
@@ -238,6 +251,11 @@ export default function CodeEditor({ path }: { path: string }): JSX.Element {
         // and a stale handle would let the menu drive a disposed instance.
         const w = window as unknown as { __cortexEditor?: typeof editor }
         w.__cortexEditor = editor
+        // With a split editor two instances are mounted; the focused one is the
+        // one the menu/format/rename actions should drive, so track focus.
+        editor.onDidFocusEditorText(() => {
+          w.__cortexEditor = editor
+        })
         editor.onDidDispose(() => {
           if (w.__cortexEditor === editor) delete w.__cortexEditor
         })
@@ -268,6 +286,10 @@ export default function CodeEditor({ path }: { path: string }): JSX.Element {
         tabSize: 2,
         automaticLayout: true,
         scrollBeyondLastLine: false,
+        // Off so dropping an editor tab onto a pane cannot paste the dragged
+        // file's path into the document (the tab drag uses a custom mime, this
+        // is belt-and-suspenders).
+        dropIntoEditor: { enabled: false },
         padding: { top: 8 }
       }}
     />
