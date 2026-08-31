@@ -10,6 +10,7 @@ import type {
   CppStandard,
   CStandard,
   ProjectConfig,
+  ProjectModel,
   BoardStatus,
   BoardPort,
   BoardTarget,
@@ -152,6 +153,11 @@ export function workspaceScopedReset(): Record<string, unknown> {
     diagnostics: [],
     // board target is per project (.cortex/config.json)
     selectedFqbn: '',
+    // Derived from the OLD workspace's files; refreshProjectModel rebuilds it
+    // for the new one from openWorkspace, but a switch that never gets there
+    // (an early return, a thrown readDir) should not leave the previous
+    // project's board/pins showing under the new project's name.
+    projectModel: null,
     // Also per project. loadProjectConfig reassigns it, but that returns early
     // when there is no workspace root, and a venv interpreter carried into the
     // next project would run its code under the wrong Python.
@@ -329,6 +335,9 @@ interface State {
   std: CppStandard
   optimization: string
 
+  // derived project model: languages, board/platform, GPIO usage
+  projectModel: ProjectModel | null
+
   // run
   runId: string | null
   running: boolean
@@ -416,6 +425,7 @@ interface State {
   loadDiagram: () => Promise<void>
 
   detectToolchains: (force?: boolean) => Promise<void>
+  refreshProjectModel: () => Promise<void>
   setCompiler: (c: string) => void
   setStd: (s: CppStandard) => void
   setOptimization: (o: string) => void
@@ -591,6 +601,7 @@ export const useStore = create<State>((set, get) => ({
   simSerial: [],
 
   toolchains: [],
+  projectModel: null,
   compiler: 'g++',
   std: 'c++23',
   rustEdition: '2021',
@@ -677,6 +688,7 @@ export const useStore = create<State>((set, get) => ({
     await get().loadProjectConfig()
     await get().loadDiagram()
     void get().refreshBoardStatus()
+    void get().refreshProjectModel()
     // Re-probe language servers for the new root. The `true` also clears a
     // crash lockout in main, so a server that kept dying on the PREVIOUS
     // project gets a fresh chance in this one rather than staying off.
@@ -1132,6 +1144,14 @@ export const useStore = create<State>((set, get) => ({
     if (cppAvail && !chains.find((c) => c.command === get().compiler && c.available)) {
       set({ compiler: cppAvail.command })
     }
+  },
+  async refreshProjectModel() {
+    const root = get().workspaceRoot
+    if (!root) return
+    const model = await window.api.buildProjectModel(root)
+    // The workspace can have changed while the scan was running (it walks up
+    // to 8000 files); only apply a result that's still for the current one.
+    if (get().workspaceRoot === root) set({ projectModel: model })
   },
   setCompiler(c) {
     set({ compiler: c })

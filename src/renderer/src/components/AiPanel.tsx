@@ -10,7 +10,8 @@ const QUICK_ACTIONS = [
 ]
 
 export default function AiPanel(): JSX.Element {
-  const { chat, aiStreaming, sendChat, toggleAi, tabs, activePath, aiWidth, settings, setSidebar } = useStore()
+  const { chat, aiStreaming, sendChat, toggleAi, tabs, activePath, aiWidth, settings, setSidebar, projectModel } =
+    useStore()
   // "Configured" means it can actually answer: a provider, plus a key unless the
   // provider is a local endpoint (which needs none).
   const provider = settings?.ai.provider ?? 'none'
@@ -23,8 +24,42 @@ export default function AiPanel(): JSX.Element {
     endRef.current?.scrollIntoView({ block: 'end' })
   }, [chat])
 
-  const currentContext = (): string | undefined =>
-    activeTab ? `File: ${activeTab.name} (${activeTab.language.label})\n\n\`\`\`\n${activeTab.content}\n\`\`\`` : undefined
+  // The AI's whole differentiator is understanding the system the code
+  // controls, not just the code - so give it the derived project model, not
+  // just the open file. Scoped to what's likely relevant: the board/platform
+  // (whole-project, it's small) and pin usage (only the active file's, not
+  // all 200 possible entries - a firmware question is almost always about
+  // the file open in front of the person asking it).
+  const projectSummary = (): string => {
+    if (!projectModel) return ''
+    const lines: string[] = []
+    const board = projectModel.boards[0]
+    if (board) {
+      const bits = [board.platform && `platform: ${board.platform}`, board.framework && `framework: ${board.framework}`]
+        .filter(Boolean)
+        .join(', ')
+      lines.push(`Board: ${board.name}${bits ? ` (${bits})` : ''}`)
+    }
+    if (projectModel.languages.length) {
+      lines.push(`Languages: ${projectModel.languages.map((l) => `${l.label} (${l.fileCount})`).join(', ')}`)
+    }
+    if (activeTab) {
+      const norm = (p: string): string => p.replace(/\\/g, '/')
+      const filePins = projectModel.pins.filter((p) => norm(p.file).endsWith(norm(activeTab.path).split('/').pop() ?? ''))
+      if (filePins.length) {
+        const desc = filePins.map((p) => `${p.pin} (${p.role}${p.mode ? `: ${p.mode}` : ''}, line ${p.line})`).join(', ')
+        lines.push(`Pins referenced in this file: ${desc}`)
+      }
+    }
+    return lines.length ? `Project:\n${lines.join('\n')}\n\n` : ''
+  }
+
+  const currentContext = (): string | undefined => {
+    const project = projectSummary()
+    const file = activeTab ? `File: ${activeTab.name} (${activeTab.language.label})\n\n\`\`\`\n${activeTab.content}\n\`\`\`` : ''
+    const combined = project + file
+    return combined.trim() ? combined : undefined
+  }
 
   const submit = async (text: string): Promise<void> => {
     if (!text.trim() || aiStreaming) return

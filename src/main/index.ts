@@ -23,6 +23,7 @@ import * as settings from './services/settingsService'
 import * as ai from './services/aiService'
 import type { AiRequest } from './services/aiService'
 import * as projectConfig from './services/projectConfigService'
+import * as projectModel from './services/projectModelService'
 import * as embedded from './services/embeddedService'
 import * as pkg from './services/packageService'
 import * as debug from './services/debugService'
@@ -595,6 +596,11 @@ function registerIpc(): void {
   ipcMain.handle(IPC.PROJECT_CONFIG_GET, (_e, root: string) => projectConfig.getProjectConfig(root))
   ipcMain.handle(IPC.PROJECT_CONFIG_SET, (_e, root: string, patch: ProjectConfig) =>
     projectConfig.setProjectConfig(root, patch)
+  )
+
+  // ---- project model (derived: languages, board/platform, GPIO usage) ----
+  ipcMain.handle(IPC.PROJECT_MODEL_BUILD, (_e, root: string) =>
+    fsService.withinWorkspace(root) ? projectModel.buildProjectModel(root) : Promise.resolve(null)
   )
 
   // ---- embedded boards ----

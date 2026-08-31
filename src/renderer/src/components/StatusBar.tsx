@@ -1,4 +1,4 @@
-import { GitBranch, CircleDot, Cpu, Radio, AlertCircle, CheckCircle2, Braces } from 'lucide-react'
+import { GitBranch, CircleDot, Cpu, Radio, AlertCircle, CheckCircle2, Braces, MemoryStick } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { langForFile, LSP_SERVER_LABEL, LSP_INSTALL_HINT, LSP_BUSY_HINT } from '@shared/lsp'
 
@@ -16,8 +16,10 @@ export default function StatusBar(): JSX.Element {
     setSidebar,
     simRunning,
     lspServers,
-    lspBusy
+    lspBusy,
+    projectModel
   } = useStore()
+  const board = projectModel?.boards[0]
   const activeTab = tabs.find((t) => t.path === activePath)
   const availCount = toolchains.filter((t) => t.available).length
   // Language-server status for the active file. Null for files no server handles
@@ -74,6 +76,16 @@ export default function StatusBar(): JSX.Element {
           {/* Empty list means detection has not finished yet; "0 toolchains" would read as a failure. */}
           <Cpu size={12} /> {toolchains.length === 0 ? 'detecting toolchains...' : `${availCount} toolchains`}
         </button>
+        {/* Read from platformio.ini, not guessed - see projectModelService.
+            Absent for a project that doesn't have one, rather than a wrong board. */}
+        {board && (
+          <span
+            className="row gap-1"
+            title={`Board: ${board.name}${board.platform ? `\nPlatform: ${board.platform}` : ''}${board.framework ? `\nFramework: ${board.framework}` : ''}\nFrom platformio.ini [env:${board.env}]`}
+          >
+            <MemoryStick size={12} /> {board.name}
+          </span>
+        )}
         {lspLang && (
           <span
             className={`row gap-1 ${lspIndexing ? 'text-ide-cyan' : lspReady ? 'text-ide-moss' : 'text-ide-muted'}`}

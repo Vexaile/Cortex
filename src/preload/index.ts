@@ -12,6 +12,7 @@ import type {
   SerialOpenOptions,
   AppInfo,
   ProjectConfig,
+  ProjectModel,
   BoardStatus,
   BoardPort,
   BoardTarget,
@@ -77,6 +78,7 @@ const api = {
     ipcRenderer.invoke(IPC.PROJECT_CONFIG_GET, root),
   setProjectConfig: (root: string, patch: ProjectConfig): Promise<ProjectConfig> =>
     ipcRenderer.invoke(IPC.PROJECT_CONFIG_SET, root, patch),
+  buildProjectModel: (root: string): Promise<ProjectModel | null> => ipcRenderer.invoke(IPC.PROJECT_MODEL_BUILD, root),
 
   // embedded boards
   boardStatus: (): Promise<BoardStatus> => ipcRenderer.invoke(IPC.BOARD_STATUS),

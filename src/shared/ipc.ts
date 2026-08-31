@@ -36,6 +36,9 @@ export const IPC = {
   PROJECT_CONFIG_GET: 'project:configGet',
   PROJECT_CONFIG_SET: 'project:configSet',
 
+  // Derived project model: languages, board/platform, GPIO usage
+  PROJECT_MODEL_BUILD: 'project:modelBuild',
+
   // Embedded boards (arduino-cli / PlatformIO): ESP32, RP2040, AVR/Arduino, ...
   BOARD_STATUS: 'board:status', // is arduino-cli available?
   BOARD_LIST_CONNECTED: 'board:listConnected',
@@ -228,6 +231,51 @@ export interface ProjectConfig {
   pythonPath?: string
   /** Last-used board (fqbn) for embedded upload. */
   boardFqbn?: string
+}
+
+// ---- Project model ---------------------------------------------------------
+// A derived, read-only picture of what a workspace actually is: what languages
+// it's written in, what board/platform it targets (when that's discoverable
+// from a real config file, not guessed), and which GPIO pins the source code
+// touches. Built by inspecting the project, never by asking the user to
+// describe it. See docs/PROJECT-MODEL.md.
+
+export interface LanguageBreakdown {
+  id: string
+  label: string
+  fileCount: number
+}
+
+export interface BoardInfo {
+  name: string
+  platform?: string
+  framework?: string
+  /** Where this came from, so the UI/AI can say how confident to be. */
+  source: 'platformio.ini'
+  /** The platformio.ini [env:NAME] section this was read from, when there's more than one. */
+  env: string
+}
+
+export type PinRole = 'pinMode' | 'digitalWrite' | 'digitalRead' | 'analogWrite' | 'analogRead'
+
+export interface PinUsage {
+  file: string
+  line: number
+  pin: string
+  role: PinRole
+  /** For pinMode specifically: OUTPUT / INPUT / INPUT_PULLUP / ... */
+  mode?: string
+}
+
+export interface ProjectModel {
+  languages: LanguageBreakdown[]
+  boards: BoardInfo[]
+  toolchains: ToolchainInfo[]
+  pins: PinUsage[]
+  /** True when the pin scan stopped at its file/match cap - the list above is
+   *  a sample, not exhaustive, and callers (the AI context builder especially)
+   *  should say so rather than imply completeness. */
+  pinsTruncated: boolean
 }
 
 // ---- Embedded boards ------------------------------------------------------
