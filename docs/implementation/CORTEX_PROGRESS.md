@@ -3,6 +3,24 @@
 Newest first. One entry per completed slice: what shipped, how it was verified,
 and what it unblocks. See `CORTEX_IMPLEMENTATION_PLAN.md` for the full plan.
 
+## Close Folder / switch workspace (Phase 1)
+
+Added a `closeWorkspace` store action and File-menu + command-palette entries.
+Closing saves all dirty tabs first, then runs the same teardown as a project
+switch (stop run/sim/debug, stop the file watcher, dispose the root's language
+servers), applies the full workspace reset, returns the main view to the editor
+so Welcome shows, and forgets the last workspace so it is not reopened on next
+launch.
+
+Verified live: open project, Close Folder returns to the Welcome screen with
+tabs/tree cleared and the last-workspace key removed; reopening restores the
+project. Typecheck clean; workspaceReset suite extended to 47 tests (a new
+closeWorkspace block asserting save-before-teardown, full reset, process/watcher/
+server teardown, and return-to-Welcome).
+
+Unblocks: a user can move between projects without restarting the app (explicit
+request); the teardown path is shared groundwork for multi-root later.
+
 ## Editor actions + trust cleanup (Phase 0 / Phase 1 start)
 
 Wired real LSP rename, find-references, and document-formatting providers over

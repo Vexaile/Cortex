@@ -382,6 +382,9 @@ interface State {
 
   // ---- actions ----
   openWorkspace: (path: string) => Promise<void>
+  /** Close the current folder and return to the Welcome screen, saving dirty
+   *  tabs and tearing down the workspace's processes, watchers, and servers. */
+  closeWorkspace: () => Promise<void>
   refreshTree: () => Promise<void>
   toggleDir: (node: FileNode) => Promise<void>
   openFile: (path: string) => Promise<void>
@@ -699,6 +702,35 @@ export const useStore = create<State>((set, get) => ({
     // crash lockout in main, so a server that kept dying on the PREVIOUS
     // project gets a fresh chance in this one rather than staying off.
     void window.api.lspServers(true).then((a) => set({ lspServers: a }))
+  },
+  async closeWorkspace() {
+    if (!get().workspaceRoot) return
+    // Save first: closing must never silently drop a dirty tab. saveAll skips
+    // binary/oversized tabs, which cannot be dirty anyway.
+    await get().saveAll()
+    // Same teardown as switching projects (openWorkspace does this before
+    // opening the next one), just with no next one to open.
+    await get().stopRun()
+    await get().stopSim()
+    get().stopDebug()
+    await window.api.watchStop()
+    const root = get().workspaceRoot
+    if (root) void window.api.lspDisposeRoot(root)
+    set({
+      ...workspaceScopedReset(),
+      workspaceRoot: null,
+      workspaceName: '',
+      tree: [],
+      // App shows Welcome only when the main view is not the simulator; a folder
+      // closed from the simulator would otherwise leave a blank canvas.
+      mainView: 'editor'
+    })
+    // Do not reopen this folder on next launch now that it was deliberately closed.
+    try {
+      localStorage.removeItem(LAST_WORKSPACE_KEY)
+    } catch {
+      /* storage unavailable */
+    }
   },
   removeRecent(path) {
     const recents = get().recents.filter((r) => normPath(r.path) !== normPath(path))

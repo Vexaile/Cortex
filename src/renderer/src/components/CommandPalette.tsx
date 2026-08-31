@@ -94,6 +94,7 @@ export default function CommandPalette({ mode, onClose }: { mode: PaletteMode; o
             return undefined
           })
       },
+      { key: 'closeFolder', label: 'File: Close Folder', run: () => void s.closeWorkspace() },
       { key: 'explorer', label: 'View: Explorer', run: () => s.setSidebar('explorer') },
       { key: 'search', label: 'View: Search', run: () => s.setSidebar('search') },
       { key: 'boards', label: 'View: Boards Manager', run: () => s.setSidebar('boards') },

@@ -159,6 +159,46 @@ describe('workspaceScopedReset', () => {
     })
   })
 
+  // Close Folder returns to Welcome. It must be as thorough a teardown as a
+  // switch (same reset, same process/watcher/server teardown), plus it must save
+  // first (closing is not a place to silently drop edits) and must forget the
+  // last workspace so it is not reopened on next launch.
+  describe('closeWorkspace', () => {
+    const body = SRC.slice(SRC.indexOf('async closeWorkspace()'), SRC.indexOf('removeRecent(path)'))
+
+    it('slices a real function body', () => {
+      expect(body).toContain('workspaceRoot')
+      expect(body.length).toBeGreaterThan(100)
+    })
+
+    it('saves all tabs before tearing anything down', () => {
+      const save = body.indexOf('saveAll()')
+      const reset = body.indexOf('workspaceScopedReset()')
+      expect(save).toBeGreaterThan(-1)
+      expect(reset).toBeGreaterThan(-1)
+      expect(save, 'saveAll must run before the reset').toBeLessThan(reset)
+    })
+
+    it('applies the full workspace reset and clears the root', () => {
+      expect(body).toContain('...workspaceScopedReset()')
+      expect(body).toMatch(/workspaceRoot:\s*null/)
+      expect(body).toMatch(/tree:\s*\[\]/)
+    })
+
+    it('stops the project processes, watcher, and language servers', () => {
+      expect(body).toContain('stopRun()')
+      expect(body).toContain('stopSim()')
+      expect(body).toContain('stopDebug()')
+      expect(body).toContain('watchStop()')
+      expect(body).toContain('lspDisposeRoot')
+    })
+
+    it('returns to the editor view so Welcome shows, and forgets the last workspace', () => {
+      expect(body).toMatch(/mainView:\s*'editor'/)
+      expect(body).toContain('removeItem(LAST_WORKSPACE_KEY)')
+    })
+  })
+
   /**
    * Everything in ProjectConfig is per project, so none of it may fall back to
    * the live value: that IS the previous project's. These four resolve in

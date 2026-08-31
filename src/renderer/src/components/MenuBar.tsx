@@ -133,6 +133,7 @@ export default function MenuBar(): JSX.Element {
       items: [
         { label: 'New Sketch', hint: 'blink', onClick: () => void newSketch() },
         { label: 'Open Folder...', hint: 'Ctrl+O', onClick: () => void openFolder() },
+        { label: 'Close Folder', disabled: !s.workspaceRoot, onClick: () => void s.closeWorkspace() },
         { sep: true },
         { label: 'Save', hint: 'Ctrl+S', disabled: !hasFile, onClick: () => void s.saveActive() },
         { label: 'Save All', disabled: s.tabs.length === 0, onClick: () => void s.saveAll() },
