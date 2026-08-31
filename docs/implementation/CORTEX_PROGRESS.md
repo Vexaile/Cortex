@@ -3,6 +3,40 @@
 Newest first. One entry per completed slice: what shipped, how it was verified,
 and what it unblocks. See `CORTEX_IMPLEMENTATION_PLAN.md` for the full plan.
 
+## Library member/class autocomplete + clangd include config (Phase 2)
+
+The reported gap: with ESP32Servo.h included, `Servo myservo; myservo.` offered
+nothing and `Serv` did not suggest the `Servo` class. Root cause: clangd, run
+under the host toolchain, cannot find the library's headers, so it cannot
+resolve library types (the same reason find-references and go-to-definition
+returned nothing in ESP32 projects). Two complementary fixes:
+
+1. clangd include configuration (`clangdConfig.ts`): `discoverIncludeDirs`
+   finds the project's own include/src and every library under lib/ and
+   .pio/libdeps, and feeds them to clangd (project dirs as -I, vendored
+   libraries as -isystem so their internal warnings stay quiet). PlatformIO
+   deps are added first and all loops are capped.
+2. A curated hardware-library dictionary (`src/shared/stdlib/cpp-libraries.json`,
+   seeded with the full ESP32Servo `Servo` API from the real header) plus
+   scope-aware completion (`src/shared/libraryComplete.ts`): infers a variable's
+   type from its declaration in the same file (value, reference, and pointer
+   styles) and offers that class's members with signatures, descriptions, and
+   documentation links (the Roblox-style popup). It defers to real clangd
+   members when clangd resolved the class (dedup on the bare name), so it
+   supplements and never duplicates.
+
+Verified live against EdgeInspect: `servo.` and `Servo *sp; sp->` both list all
+13 Servo members with descriptions and no duplicates; `.clangd` now carries the
+project and ESP32Servo include dirs. 41 targeted tests; full suite green.
+A 4-dimension adversarial review ran on the diff; its confirmed findings (dedup
+keyed on the signature-bearing label, the pointer-sigil regex gap, per-request
+full-document scans, comment/string-unaware scanning, and hover over-broadening)
+were all fixed before commit.
+
+Unblocks: the same include config makes clangd resolve more library symbols
+(better real completion/references/definition over time); the dictionary is
+grown by the recurring agent for more libraries.
+
 ## Close Folder / switch workspace (Phase 1)
 
 Added a `closeWorkspace` store action and File-menu + command-palette entries.

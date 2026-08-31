@@ -1,0 +1,70 @@
+{
+  "esp32servo.h": {
+    "url": "https://github.com/madhephaestus/ESP32Servo",
+    "classes": {
+      "Servo": {
+        "description": "Controls an RC servo on an ESP32. Create an instance, attach() it to a GPIO pin, then write() an angle or writeMicroseconds() a pulse width. Uses fixed-frequency PWM (50 Hz by default) through the ESP32's MCPWM or LEDC hardware, so it works on the pins that support PWM output.",
+        "docUrl": "https://github.com/madhephaestus/ESP32Servo",
+        "example": "#include <ESP32Servo.h>\nServo myservo;\nvoid setup() {\n  myservo.setPeriodHertz(50);   // standard 50 Hz servo\n  myservo.attach(18, 500, 2400); // pin, min us, max us\n  myservo.write(90);            // center\n}",
+        "members": {
+          "attach": {
+            "signature": "int attach(int pin)  |  int attach(int pin, int min, int max)",
+            "description": "Attaches the servo to a GPIO pin using the next free PWM channel, and returns the channel number (or 0 on failure). The three-argument form also sets the minimum and maximum pulse widths in microseconds (enforced min 500, max 2500). On a classic ESP32 the recommended pins are 2, 4, 12-19, 21-23, 25-27, 32-33.",
+            "example": "myservo.attach(18);\n// or with explicit pulse range:\nmyservo.attach(18, 500, 2400);"
+          },
+          "write": {
+            "signature": "void write(int value)",
+            "description": "Sets the servo position. A value below 500 is treated as an angle in degrees (0 to 180); a value of 500 or more is treated as a pulse width in microseconds. Out-of-range values are clamped.",
+            "example": "myservo.write(90); // 90 degrees"
+          },
+          "writeMicroseconds": {
+            "signature": "void writeMicroseconds(int value)",
+            "description": "Sets the servo pulse width directly in microseconds, clamped to the attached min/max. Use this when you want precise control past the 0-180 degree mapping.",
+            "example": "myservo.writeMicroseconds(1500); // center"
+          },
+          "read": {
+            "signature": "int read()",
+            "description": "Returns the last written position as an angle between 0 and 180 degrees."
+          },
+          "readMicroseconds": {
+            "signature": "int readMicroseconds()",
+            "description": "Returns the last written pulse width in microseconds."
+          },
+          "attached": {
+            "signature": "bool attached()",
+            "description": "Returns true if this servo is currently attached to a pin."
+          },
+          "detach": {
+            "signature": "void detach()",
+            "description": "Detaches the servo, freeing its pin and PWM channel for reuse."
+          },
+          "setPeriodHertz": {
+            "signature": "void setPeriodHertz(int hertz)",
+            "description": "Sets the servo refresh frequency in hertz. Use 50 for standard hobby servos, or a higher value (some digital servos accept up to ~333 Hz). Call this before attach().",
+            "example": "myservo.setPeriodHertz(50);"
+          },
+          "setTimerWidth": {
+            "signature": "void setTimerWidth(int value)",
+            "description": "Sets the PWM timer resolution in bits (10 to 20; ESP32 only). The current pulse width is recomputed as a side effect."
+          },
+          "readTimerWidth": {
+            "signature": "int readTimerWidth()",
+            "description": "Returns the PWM timer resolution in bits (ESP32 only)."
+          },
+          "writeTicks": {
+            "signature": "void writeTicks(int value)",
+            "description": "Writes the raw PWM tick count, the smallest increment the servo hardware can resolve. Most code uses write() or writeMicroseconds() instead."
+          },
+          "readTicks": {
+            "signature": "int readTicks()",
+            "description": "Returns the last written pulse width in raw PWM ticks."
+          },
+          "release": {
+            "signature": "void release()",
+            "description": "Releases the servo, stopping the PWM signal on its pin without fully detaching it."
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,5 +1,5 @@
 import { spawn } from 'child_process'
-import { readFile, writeFile } from 'fs/promises'
+import { readFile, writeFile, readdir, stat } from 'fs/promises'
 import { join } from 'path'
 import { getProjectConfig } from './projectConfigService'
 import { safeCommand, needsShell } from './commandResolver'
@@ -111,7 +111,13 @@ function deriveToolchain(compiler: string): Promise<Toolchain> {
   return probe
 }
 
-export function buildClangdConfig(tc: Toolchain, cppStd: string, cStd = 'c17'): string {
+export function buildClangdConfig(
+  tc: Toolchain,
+  cppStd: string,
+  cStd = 'c17',
+  projectIncludes: string[] = [],
+  depIncludes: string[] = []
+): string {
   // -Wunused-variable/-Wunused-function (an unused local, a defined-but-never-
   // called function, an unused enum member) are gated behind -Wall in
   // clang/gcc; without it clangd's diagnostics stay quiet about dead code even
@@ -123,6 +129,19 @@ export function buildClangdConfig(tc: Toolchain, cppStd: string, cStd = 'c17'): 
     // Two argv tokens: clang takes the path as the argument after -isystem.
     global.push('-isystem', dir)
   }
+  // The project's own headers as -I (warnings on: this is the user's code).
+  // Without these, clangd cannot resolve a project header and every symbol it
+  // declares is unknown, so completion and go-to-definition go dead across the
+  // project's own modules.
+  for (const dir of projectIncludes) global.push('-I', dir)
+  // Third-party library headers (.pio/libdeps, lib/*) as -isystem: this is how
+  // clangd finds a library header like ESP32Servo.h so member completion and
+  // hover work on the classes it declares, while -isystem keeps the library's
+  // own internal warnings out of the user's diagnostics. It is not a full
+  // compile database (that needs the vendor toolchain), so a library that
+  // transitively needs core headers clangd cannot find still degrades to the
+  // curated library dictionary rather than resolving fully.
+  for (const dir of depIncludes) global.push('-isystem', dir)
   const list = (flags: string[]): string => flags.map((f) => `    - ${JSON.stringify(f)}`).join('\n')
   // Multi-document YAML: a global fragment, then -std scoped by file kind so the
   // C++ standard never reaches a .c file (which clang rejects outright). The C++
@@ -151,6 +170,61 @@ export function buildClangdConfig(tc: Toolchain, cppStd: string, cStd = 'c17'): 
     list([`-std=${cStd}`]),
     ''
   ].join('\n')
+}
+
+// A library commonly puts its headers either at the package root or in a src/
+// subdir; add both when present. Capped so a project with a huge libdeps tree
+// cannot blow up clangd's argv.
+const MAX_DEP_DIRS = 120
+
+/**
+ * Find the include directories a C/C++ project expects to be on the search
+ * path: the project's own headers (include/src/lib), and every installed
+ * library under lib/ and .pio/libdeps (PlatformIO). Returns absolute paths.
+ * Best-effort and bounded; a missing directory is simply skipped.
+ */
+export async function discoverIncludeDirs(root: string): Promise<{ project: string[]; deps: string[] }> {
+  const project: string[] = []
+  const deps: string[] = []
+  const isDir = async (p: string): Promise<boolean> => {
+    try {
+      return (await stat(p)).isDirectory()
+    } catch {
+      return false
+    }
+  }
+  const listDirs = async (p: string): Promise<string[]> => {
+    try {
+      const entries = await readdir(p, { withFileTypes: true })
+      return entries.filter((e) => e.isDirectory()).map((e) => join(p, e.name))
+    } catch {
+      return []
+    }
+  }
+  // Add a library dir and its src/ subdir; returns false once the cap is
+  // reached so callers stop walking (bounding both the argv and the fs work).
+  const addLib = async (dir: string): Promise<boolean> => {
+    if (deps.length >= MAX_DEP_DIRS) return false
+    deps.push(dir)
+    const src = join(dir, 'src')
+    if (deps.length < MAX_DEP_DIRS && (await isDir(src))) deps.push(src)
+    return deps.length < MAX_DEP_DIRS
+  }
+  // The project's own headers.
+  for (const d of ['include', 'src']) if (await isDir(join(root, d))) project.push(join(root, d))
+  // PlatformIO installed dependencies first: these are the ones a user most
+  // needs resolved, so a large local lib/ tree cannot starve them out of the cap.
+  const libdeps = join(root, '.pio', 'libdeps')
+  libdepsLoop: for (const env of await listDirs(libdeps)) {
+    for (const lib of await listDirs(env)) {
+      if (!(await addLib(lib))) break libdepsLoop
+    }
+  }
+  // lib/<Name> and lib/<Name>/src (Arduino/PlatformIO local libraries).
+  for (const libDir of await listDirs(join(root, 'lib'))) {
+    if (!(await addLib(libDir))) break
+  }
+  return { project, deps }
 }
 
 /** Append `.clangd` to <root>/.gitignore (create/dedupe) so a machine-specific,
@@ -213,7 +287,8 @@ export async function ensureClangdConfig(root: string): Promise<void> {
   // target; leave clangd to its defaults instead.
   if (tc.includes.length === 0) return
 
-  const content = buildClangdConfig(tc, cppStd, cStd)
+  const { project, deps } = await discoverIncludeDirs(root)
+  const content = buildClangdConfig(tc, cppStd, cStd, project, deps)
   if (existing === content) return
   try {
     await writeFile(cfgPath, content, 'utf8')

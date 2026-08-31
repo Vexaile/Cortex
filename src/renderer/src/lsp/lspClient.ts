@@ -6,6 +6,17 @@ import pythonStdlib from '@shared/stdlib/python.json'
 import cppStdlib from '@shared/stdlib/cpp.json'
 import pythonSnippets from '@shared/stdlib/python-snippets.json'
 import cppSnippets from '@shared/stdlib/cpp-snippets.json'
+import cppLibraries from '@shared/stdlib/cpp-libraries.json'
+import {
+  indexLibraries,
+  includedHeaders,
+  inferKnownType,
+  librarySuggestions,
+  libSuggestionDoc,
+  stripCommentsAndStrings,
+  type LibIndexEntry,
+  type LibraryDict
+} from '@shared/libraryComplete'
 
 /**
  * Stable key for a document, independent of how a URI was encoded or cased.
@@ -232,6 +243,130 @@ const SNIPPET_FILES: Partial<Record<LspLang, Record<string, StdlibSnippet>>> = {
   cpp: cppSnippets as Record<string, StdlibSnippet>
 }
 
+// ---- curated hardware-library completion ------------------------------
+// Member/class completion for library types clangd cannot resolve under the
+// host toolchain (see src/shared/libraryComplete.ts). C++ only for now.
+let cppLibIndexCache: Map<string, LibIndexEntry> | null = null
+function cppLibraryIndex(): Map<string, LibIndexEntry> {
+  if (!cppLibIndexCache) cppLibIndexCache = indexLibraries(cppLibraries as LibraryDict)
+  return cppLibIndexCache
+}
+const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+// The comment-stripped document text and its included-header set, cached per
+// model version so completion/hover do not re-scan the whole buffer on every
+// request (they fire at trigger frequency, and CLAUDE.md bans expensive
+// analysis on every keystroke). Recomputed only when the document changes.
+const libScanCache = new WeakMap<monaco.editor.ITextModel, { version: number; clean: string; headers: Set<string> }>()
+function libScan(model: monaco.editor.ITextModel): { clean: string; headers: Set<string> } {
+  const version = model.getVersionId()
+  const cached = libScanCache.get(model)
+  if (cached && cached.version === version) return cached
+  const clean = stripCommentsAndStrings(model.getValue())
+  const entry = { version, clean, headers: includedHeaders(clean) }
+  libScanCache.set(model, entry)
+  return entry
+}
+/** Does the document include the header for at least one curated library? A
+ *  cheap gate so a file that uses no curated library does no scanning work. */
+function usesAnyCuratedLibrary(idx: Map<string, LibIndexEntry>, headers: Set<string>): boolean {
+  for (const entry of idx.values()) if (headers.has(entry.header)) return true
+  return false
+}
+
+/**
+ * Library completions for the cursor, minus any label the language server
+ * already provided: clangd wins where it resolved the class, the dictionary
+ * fills the gap where it did not. So there are no duplicate members, and a real
+ * signature always beats a curated one.
+ */
+function libraryCompletions(
+  m: Mon,
+  lang: LspLang,
+  model: monaco.editor.ITextModel,
+  position: monaco.IPosition,
+  range: monaco.IRange,
+  alreadyProvided: Set<string>
+): monaco.languages.CompletionItem[] {
+  if (lang !== 'cpp') return []
+  const idx = cppLibraryIndex()
+  if (idx.size === 0) return []
+  const { clean, headers } = libScan(model)
+  if (!usesAnyCuratedLibrary(idx, headers)) return []
+  const linePrefix = model.getValueInRange({
+    startLineNumber: position.lineNumber,
+    startColumn: 1,
+    endLineNumber: position.lineNumber,
+    endColumn: position.column
+  })
+  const K = m.languages.CompletionItemKind
+  return librarySuggestions(idx, clean, linePrefix, headers)
+    .filter((s) => !alreadyProvided.has(s.name))
+    .map((s) => {
+      const isMember = s.kind === 'member'
+      return {
+        label: s.name,
+        kind: isMember ? K.Method : K.Class,
+        // Methods insert with parens and the cursor between them; a class name
+        // is a type, so it inserts bare.
+        insertText: isMember ? `${s.name}($0)` : s.name,
+        insertTextRules: isMember ? m.languages.CompletionItemInsertTextRule.InsertAsSnippet : undefined,
+        detail: s.signature || (isMember ? `${s.className} member` : `${LANG_LABEL[lang]} library class`),
+        documentation: { value: libSuggestionDoc(s) },
+        // Members rank at the top after a dot (a real LSP member, if any, was
+        // already filtered out above); a class suggestion ranks below real symbols.
+        sortText: isMember ? `00_${s.name}` : `zz_lib_${s.name}`,
+        range
+      }
+    })
+}
+
+/** Hover markdown for a library class name or a known-typed variable's member,
+ *  or null. Works even when clangd returned no hover for the symbol. */
+function libraryHover(
+  lang: LspLang,
+  model: monaco.editor.ITextModel,
+  position: monaco.IPosition,
+  word: string
+): string | null {
+  if (lang !== 'cpp') return null
+  const idx = cppLibraryIndex()
+  if (idx.size === 0) return null
+  const { clean: docText, headers } = libScan(model)
+  if (!usesAnyCuratedLibrary(idx, headers)) return null
+  const cls = idx.get(word)
+  if (cls && headers.has(cls.header)) {
+    return libSuggestionDoc({
+      kind: 'class',
+      name: word,
+      className: word,
+      description: cls.def.description,
+      example: cls.def.example,
+      docUrl: cls.def.docUrl
+    })
+  }
+  // A member: find `receiver.word` on this line and infer the receiver's type.
+  const line = model.getLineContent(position.lineNumber)
+  const mm = new RegExp('([A-Za-z_][A-Za-z0-9_]*)\\s*(?:\\.|->)\\s*' + escapeRe(word) + '\\b').exec(line)
+  if (mm) {
+    const className = inferKnownType(docText, mm[1], new Set(idx.keys()))
+    const entry = className ? idx.get(className) : undefined
+    const mem = entry?.def.members[word]
+    if (entry && mem && headers.has(entry.header)) {
+      return libSuggestionDoc({
+        kind: 'member',
+        name: word,
+        className: className!,
+        description: mem.description,
+        signature: mem.signature,
+        example: mem.example,
+        docUrl: mem.docUrl ?? entry.def.docUrl
+      })
+    }
+  }
+  return null
+}
+
 function snippetSuggestions(m: Mon, lang: LspLang, range: monaco.IRange): monaco.languages.CompletionItem[] {
   const snippets = SNIPPET_FILES[lang]
   if (!snippets) return []
@@ -323,8 +458,7 @@ function registerProviders(m: Mon): void {
           startColumn: word.startColumn,
           endColumn: word.endColumn
         }
-        return {
-          suggestions: items.slice(0, 200).map((it) => {
+        const base = items.slice(0, 200).map((it) => {
             const rawDoc = it.documentation ? contentsToMarkdown(it.documentation as LspContents) : ''
             const enriched = enrichDocumentation(lang, it.label, rawDoc)
             const kind = completionKind(m, it.kind)
@@ -347,7 +481,20 @@ function registerProviders(m: Mon): void {
             // follow-up request needs to ask for THIS one.
             completionOrigin.set(suggestion, { doc, raw: it })
             return suggestion
-          }).concat(snippetSuggestions(m, lang, range))
+          })
+        // Library completions defer to whatever the server already offered:
+        // clangd's real members win, the curated dictionary fills the gap.
+        // Dedup on the BARE name, not the label: without labelDetailsSupport
+        // clangd folds the signature into the label ("write(int value)"), so a
+        // label compare would never match the curated member "write" and both
+        // would show. filterText carries the bare name; fall back to stripping
+        // the signature/template off the label.
+        const bareName = (it: LspCompletion): string => it.filterText || it.label.replace(/[(<:].*$/s, '').trim()
+        const providedLabels = new Set(items.map(bareName))
+        return {
+          suggestions: base
+            .concat(snippetSuggestions(m, lang, range))
+            .concat(libraryCompletions(m, lang, model, position, range, providedLabels))
         }
       },
       async resolveCompletionItem(item, token) {
@@ -378,14 +525,28 @@ function registerProviders(m: Mon): void {
           textDocument: { uri: doc.uri },
           position: toLspPos(position)
         })
-        if (token.isCancellationRequested || !res?.contents) return null
-        const raw = contentsToMarkdown(res.contents)
+        if (token.isCancellationRequested) return null
+        // clangd may have nothing for a library type it could not resolve; the
+        // library dictionary still answers, so do not bail on an empty result.
+        const raw = res?.contents ? contentsToMarkdown(res.contents) : ''
         // Hover has no item label the way completion does; the identifier
         // under the cursor is the equivalent lookup key.
         const word = model.getWordAtPosition(position)?.word
-        const value = word ? enrichDocumentation(lang, word, raw) : raw
+        const libDoc = word ? libraryHover(lang, model, position, word) : null
+        let value: string
+        if (libDoc) {
+          value = raw.trim() ? `${libDoc}\n\n---\n${raw}` : libDoc
+        } else if (raw.trim()) {
+          // Only enrich a hover the server actually produced. Enriching an empty
+          // server result would pop curated stdlib docs for an identifier the
+          // server never resolved to that symbol (a shadowing local, a name
+          // inside a comment), which is a hover where there should be none.
+          value = word ? enrichDocumentation(lang, word, raw) : raw
+        } else {
+          return null
+        }
         if (!value.trim()) return null
-        return { contents: [{ value }], range: res.range ? toMonacoRange(res.range) : undefined }
+        return { contents: [{ value }], range: res?.range ? toMonacoRange(res.range) : undefined }
       }
     })
 

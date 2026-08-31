@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'vitest'
-import { parseDriverOutput, buildClangdConfig, MARKER } from '../src/main/services/clangdConfig'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { parseDriverOutput, buildClangdConfig, discoverIncludeDirs, MARKER } from '../src/main/services/clangdConfig'
 
 // A trimmed but representative `g++ -E -xc++ -v -` report (MSYS2 MinGW), with the
 // CRLF line endings the driver emits on Windows.
@@ -74,6 +77,21 @@ describe('buildClangdConfig', () => {
     expect(cfg).toContain('"C:/b/inc"')
   })
 
+  it('adds project include dirs as -I and library dirs as -isystem', () => {
+    const withInc = buildClangdConfig(tc, 'c++23', 'c17', ['C:/proj/src', 'C:/proj/include'], ['C:/proj/.pio/libdeps/env/ESP32Servo/src'])
+    // The global fragment is the first YAML doc.
+    const globalFrag = withInc.split('\n---\n')[0]
+    expect(globalFrag).toContain('"-I"')
+    expect(globalFrag).toContain('"C:/proj/src"')
+    expect(globalFrag).toContain('"C:/proj/include"')
+    // Library dirs use -isystem (warnings off), and the library path appears.
+    expect(globalFrag).toContain('"C:/proj/.pio/libdeps/env/ESP32Servo/src"')
+    // The library path is preceded by -isystem, not -I.
+    const idxLib = globalFrag.indexOf('"C:/proj/.pio/libdeps/env/ESP32Servo/src"')
+    const before = globalFrag.slice(0, idxLib)
+    expect(before.lastIndexOf('"-isystem"')).toBeGreaterThan(before.lastIndexOf('"-I"'))
+  })
+
   it('scopes the C++ standard to C++ extensions and keeps it off .c files', () => {
     const frags = cfg.split('\n---\n')
     const cppFrag = frags.find((f) => f.includes('cpp|cxx'))
@@ -118,5 +136,35 @@ describe('buildClangdConfig', () => {
     // the house-style test forbids (en dash, em dash, ellipsis).
     const forbidden = new RegExp('[' + String.fromCharCode(0x2013, 0x2014, 0x2026) + ']')
     expect(forbidden.test(cfg)).toBe(false)
+  })
+})
+
+describe('discoverIncludeDirs', () => {
+  let root: string
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'cortex-inc-'))
+  })
+  afterEach(() => rmSync(root, { recursive: true, force: true }))
+
+  it('finds project include/src as project dirs and libraries as dep dirs', async () => {
+    mkdirSync(join(root, 'include'))
+    mkdirSync(join(root, 'src'))
+    mkdirSync(join(root, 'lib', 'MyLib', 'src'), { recursive: true })
+    mkdirSync(join(root, '.pio', 'libdeps', 'esp32dev', 'ESP32Servo', 'src'), { recursive: true })
+
+    const { project, deps } = await discoverIncludeDirs(root)
+    const rel = (p: string): string => p.slice(root.length + 1).replace(/\\/g, '/')
+    expect(project.map(rel).sort()).toEqual(['include', 'src'])
+    const depRel = deps.map(rel)
+    expect(depRel).toContain('lib/MyLib')
+    expect(depRel).toContain('lib/MyLib/src')
+    expect(depRel).toContain('.pio/libdeps/esp32dev/ESP32Servo')
+    expect(depRel).toContain('.pio/libdeps/esp32dev/ESP32Servo/src')
+  })
+
+  it('returns empty lists for a bare project with no include dirs', async () => {
+    const { project, deps } = await discoverIncludeDirs(root)
+    expect(project).toEqual([])
+    expect(deps).toEqual([])
   })
 })
