@@ -4,6 +4,14 @@ import Editor, { loader } from '@monaco-editor/react'
 // Monaco ships (~80 of them: Solidity, Apex, FreeMarker, ABAP...), which is how
 // an embedded IDE that supports nine languages came to emit 91 chunks and 24MB.
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api'
+// editor.api is the core editor + types ONLY - no editor contributions. Without
+// this, hover (ours AND Monaco's own marker/diagnostic tooltip), find/replace,
+// folding, multi-cursor, rename, parameter hints, and most of what makes Monaco
+// feel like an editor rather than a textarea are simply never registered, since
+// their controllers live here, not in editor.api. This is core editor UX, not
+// per-language weight (that's the basic-languages imports below and the
+// language *workers* under vs/language/*, which this still correctly skips).
+import 'monaco-editor/esm/vs/editor/editor.all'
 // Exactly the languages shared/languages.ts claims. Adding one there means
 // adding its contribution here, or the file opens with no highlighting.
 // zig and plaintext have no Monaco grammar to import.

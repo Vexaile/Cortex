@@ -516,6 +516,21 @@ function lsSet(key: string, v: number): void {
     /* storage unavailable */
   }
 }
+function lsBool(key: string, fallback: boolean): boolean {
+  try {
+    const v = localStorage.getItem(key)
+    return v === null ? fallback : v === '1'
+  } catch {
+    return fallback
+  }
+}
+function lsSetBool(key: string, v: boolean): void {
+  try {
+    localStorage.setItem(key, v ? '1' : '0')
+  } catch {
+    /* storage unavailable */
+  }
+}
 
 /** A workspace the user has opened before. An IDE that forgets your project on
  *  every launch makes you re-pick it forever, and pushes your hand onto whatever
@@ -556,7 +571,10 @@ export const useStore = create<State>((set, get) => ({
   sidebarVisible: true,
   bottomView: 'output',
   bottomVisible: true,
-  aiVisible: true,
+  // JetBrains-style: the AI assistant is a tool window you opt into, not
+  // something that claims editor width before you've asked for it. Remembered
+  // per-machine after that, the same way its width already is.
+  aiVisible: lsBool('cortex.aiVisible', false),
   sidebarWidth: lsNum('cortex.sidebarWidth', 256),
   aiWidth: lsNum('cortex.aiWidth', 320),
   bottomHeight: lsNum('cortex.bottomHeight', 256),
@@ -891,7 +909,9 @@ export const useStore = create<State>((set, get) => ({
     set({ bottomVisible: !get().bottomVisible })
   },
   toggleAi() {
-    set({ aiVisible: !get().aiVisible })
+    const v = !get().aiVisible
+    set({ aiVisible: v })
+    lsSetBool('cortex.aiVisible', v)
   },
 
   async startSim() {

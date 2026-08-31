@@ -1,4 +1,4 @@
-import { X, Circle, FileCode2, FileWarning } from 'lucide-react'
+import { X, FileCode2, FileWarning } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import CodeEditor from './CodeEditor'
 import EmptyState from './EmptyState'
@@ -39,22 +39,13 @@ export default function EditorArea(): JSX.Element {
                 </span>
                 <span className="truncate">{tab.name}</span>
               </button>
-              {/* The unsaved marker must always be visible (it was hover-only, so a
-                  dirty tab looked identical to a saved one). Swap to X on hover. */}
               <button
                 type="button"
                 onClick={() => closeTab(tab.path)}
                 title={dirty ? 'Unsaved changes. Click to close' : 'Close'}
                 className="shrink-0 rounded p-0.5 text-ide-faint hover:bg-ide-hover hover:text-ide-text"
               >
-                {dirty ? (
-                  <>
-                    <Circle size={9} className="fill-ide-amber text-ide-amber group-hover:hidden" />
-                    <X size={14} className="hidden group-hover:block" />
-                  </>
-                ) : (
-                  <X size={14} className="opacity-0 group-hover:opacity-100" />
-                )}
+                <X size={14} className="opacity-0 group-hover:opacity-100" />
               </button>
             </div>
           )
