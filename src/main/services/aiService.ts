@@ -1,6 +1,7 @@
 import type { BrowserWindow } from 'electron'
 import { IPC } from '../../shared/ipc'
 import { getSettings } from './settingsService'
+import ENGINEER_GUIDE from '../prompts/embedded-engineer.md?raw'
 
 export interface AiMessage {
   role: 'user' | 'assistant'
@@ -14,12 +15,13 @@ export interface AiRequest {
   context?: string
 }
 
-const EMBEDDED_SYSTEM_PROMPT = `You are the Cortex embedded engineering assistant.
-You specialize in low-level and embedded development: C/C++ (up to C++23), firmware,
-interrupts, DMA, RTOS tasks, peripheral registers, memory layout, and hardware bring-up.
-When reviewing firmware, look specifically for: stack overflow risk, race conditions,
-ISRs that run too long, heap fragmentation, DMA misuse, missing 'volatile', and
-watchdog-reset hazards. Be concise and concrete. Prefer diffs and register-level detail.`
+// The same senior-embedded-engineer operating manual the agent runs on, plus a
+// note that the chat panel has no tools. One source of truth for both surfaces.
+const EMBEDDED_SYSTEM_PROMPT = `${ENGINEER_GUIDE}
+
+---
+
+You are answering in the Cortex chat panel. You have no tools here, so reason from what the user shows you and ask for a file, an error, or a config value when you need it rather than guessing. Be concise and concrete; prefer a focused snippet or diff over a full rewrite.`
 
 function stream(win: BrowserWindow, id: string, delta: string, done: boolean, error?: string): void {
   if (!win.isDestroyed()) {

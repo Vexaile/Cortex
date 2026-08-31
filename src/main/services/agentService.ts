@@ -21,6 +21,14 @@ import {
   STRUCTURED_FALLBACK_INSTRUCTION,
   parseStructuredProposal
 } from '../../shared/agentTools'
+import ENGINEER_GUIDE from '../prompts/embedded-engineer.md?raw'
+
+/**
+ * The full system prompt: the senior-embedded-engineer operating manual (the
+ * shared skills file), then the concrete tool contract and approval model. The
+ * manual sets how the agent works; AGENT_SYSTEM_PROMPT sets what its tools are.
+ */
+const SYSTEM = `${ENGINEER_GUIDE}\n\n---\n\n${AGENT_SYSTEM_PROMPT}`
 
 /**
  * The Cortex engineering agent: a provider-native tool-calling loop that reads
@@ -285,7 +293,7 @@ async function anthropicLoop(
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model, max_tokens: 8192, system: AGENT_SYSTEM_PROMPT, tools, messages })
+      body: JSON.stringify({ model, max_tokens: 8192, system: SYSTEM, tools, messages })
     })
     if (!res.ok) throw new Error(`Anthropic API error ${res.status}: ${(await res.text()).slice(0, 500)}`)
     const data = (await res.json()) as {
@@ -337,7 +345,7 @@ async function openAiLoop(
     (baseUrl || (provider === 'openai' ? 'https://api.openai.com' : 'http://localhost:11434')) + '/v1/chat/completions'
   const tools = toOpenAiTools()
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const messages: any[] = [{ role: 'system', content: AGENT_SYSTEM_PROMPT }, ...req.messages.map((m) => ({ role: m.role, content: m.content }))]
+  const messages: any[] = [{ role: 'system', content: SYSTEM }, ...req.messages.map((m) => ({ role: m.role, content: m.content }))]
 
   for (let step = 0; step < MAX_AGENT_STEPS; step++) {
     if (token.cancelled) return void emit(win, { id: req.id, kind: 'done' })
@@ -443,7 +451,7 @@ async function singleShot(provider: string, apiKey: string, model: string, baseU
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ systemInstruction: { parts: [{ text: AGENT_SYSTEM_PROMPT }] }, contents: [{ role: 'user', parts: [{ text: prompt }] }] })
+      body: JSON.stringify({ systemInstruction: { parts: [{ text: SYSTEM }] }, contents: [{ role: 'user', parts: [{ text: prompt }] }] })
     })
     if (!res.ok) throw new Error(`Gemini API error ${res.status}: ${(await res.text()).slice(0, 500)}`)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -456,7 +464,7 @@ async function singleShot(provider: string, apiKey: string, model: string, baseU
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ model, messages: [{ role: 'system', content: AGENT_SYSTEM_PROMPT }, { role: 'user', content: prompt }] })
+    body: JSON.stringify({ model, messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: prompt }] })
   })
   if (!res.ok) throw new Error(`AI API error ${res.status}: ${(await res.text()).slice(0, 500)}`)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

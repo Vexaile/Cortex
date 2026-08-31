@@ -3,6 +3,36 @@
 Newest first. One entry per completed slice: what shipped, how it was verified,
 and what it unblocks. See `CORTEX_IMPLEMENTATION_PLAN.md` for the full plan.
 
+## Senior-engineer operating manual as the AI system prompt (Phase 3)
+
+The agent and the chat assistant had short, generic system prompts. Both now run
+on a real operating manual, `src/main/prompts/embedded-engineer.md`, that gives
+them the discipline of a senior embedded engineer rather than a code vending
+machine. It distills the workflows the human engineering process here follows:
+the investigation loop (characterize, isolate, hypothesize with falsifiable
+hypotheses, test one at a time, fix causes not symptoms), the code-writing
+discipline (establish the code needs to exist, reuse, follow the local pattern,
+mirror the surrounding code, keep symmetry, default to no comment), the review
+lenses applied before proposing (correctness, concurrency/interrupts, timing,
+memory, hardware, consistency/simplicity/coverage, each with a failure
+scenario), plan-proportionally, verify-before-claiming-done, real embedded-domain
+judgment (register/prescaler/ISR/DMA/RTOS reasoning), and two rules above all:
+be honest (never fabricate a pin, register, API, or file) and ground every claim
+in evidence.
+
+The manual is the single source of truth for both surfaces: the agent's system
+prompt is the manual followed by the tool contract, and the chat assistant's is
+the manual followed by a no-tools note. It is authored as markdown and inlined
+at build with a Vite `?raw` import (ambient-typed in
+`src/main/prompts/raw-md.d.ts`), so editing the .md changes both assistants and
+there is no runtime file read.
+
+Verified: `?raw` inlines the guide into the built main bundle; a live agent run
+(mock provider, user settings preserved) shows the full manual plus the tool
+contract reach the model as the system prompt (9705 chars, all sections
+present). Typecheck clean, style rules pass. Reviewed for embedded accuracy and
+wiring before commit.
+
 ## AI engineering agent: the first real tool-loop step (Phase 3 keystone)
 
 The AI panel was a single-shot chat: it answered questions but could not act.
