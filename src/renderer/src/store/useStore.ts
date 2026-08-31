@@ -159,6 +159,7 @@ export function workspaceScopedReset(): Record<string, unknown> {
     simSerial: [],
     simInputs: {},
     simWiring: null,
+    simBlock: null,
     ...SIM_PIN_RESET,
     simRunning: false,
     simRunId: null,
@@ -243,6 +244,15 @@ export interface SimLine {
   text: string
   kind: 'serial' | 'system'
 }
+
+/** Why the simulator is blocked from running: a missing host C++ compiler (the
+ *  simulator compiles on this machine), or a file that is not an Arduino sketch.
+ *  `path` is the file the block was raised for, so the panel follows that file:
+ *  switching to another tab reveals the canvas, and switching back shows the same
+ *  (still-accurate) message rather than a stale one naming the wrong file. */
+export type SimBlock =
+  | { reason: 'compiler'; path: string }
+  | { reason: 'not-sketch'; path: string; lines: string[] }
 
 export interface ChatMessage {
   role: 'user' | 'assistant'
@@ -358,6 +368,12 @@ interface State {
   simWiring: WiringTarget | null // (part, pin) awaiting a board-pin click, or null
   simInputs: Record<number, number> // user-driven pin inputs (buttons, pots)
   simSerial: SimLine[]
+  /** Why the simulator cannot run this sketch, shown as a friendly full-stage
+   *  state (a missing host compiler, or a non-sketch file) instead of a cryptic
+   *  serial line. Null when the sim can run. */
+  simBlock: SimBlock | null
+  /** True while recheckCompiler is re-scanning after a "no compiler" block. */
+  simRechecking: boolean
 
   // toolchains + build config
   toolchains: ToolchainInfo[]
@@ -457,6 +473,9 @@ interface State {
   // simulator
   startSim: () => Promise<void>
   stopSim: () => Promise<void>
+  /** Re-scan the toolchains after a "no compiler" block and, if one is now
+   *  found, run the simulation. */
+  recheckCompiler: () => Promise<void>
   handleSimEvent: (e: SimEvent) => void
   handleSimExit: (e: SimExit) => void
   addPart: (type: SimPartType) => void
@@ -649,6 +668,8 @@ export const useStore = create<State>((set, get) => ({
   simWiring: null,
   simInputs: {},
   simSerial: [],
+  simBlock: null,
+  simRechecking: false,
 
   toolchains: [],
   projectModel: null,
@@ -1036,16 +1057,11 @@ export const useStore = create<State>((set, get) => ({
     if (get().toolchains.length === 0) await get().detectToolchains()
     const cpp = get().toolchains.find((t) => t.available && isHostCpp(t.command))
     if (!cpp) {
-      set({
-        mainView: 'simulator',
-        simSerial: [
-          'No C++ compiler found, so the simulator cannot build this sketch.',
-          'The simulator compiles your sketch on this machine with g++ or clang++.',
-          'Install one, then reopen the Toolchains panel and press Rescan:',
-          '   winget install MSYS2.MSYS2      (then: pacman -S mingw-w64-ucrt-x86_64-gcc)',
-          '   or install LLVM/Clang and ensure clang++ is on PATH.'
-        ].map((text) => ({ text, kind: 'system' as const }))
-      })
+      // A friendly full-stage state with a per-OS install command and a Recheck
+      // button, not five cryptic lines in the serial pane. This is the single
+      // most common first-run wall: New Sketch -> blinking LED silently needs a
+      // host compiler.
+      set({ mainView: 'simulator', simBlock: { reason: 'compiler', path: activePath }, simSerial: [] })
       return
     }
     // The simulator appends its own main(), so a plain C++ file that already has
@@ -1055,14 +1071,19 @@ export const useStore = create<State>((set, get) => ({
     if (!isSketch(activePath) && (hasMain || !hasSetupLoop)) {
       set({
         mainView: 'simulator',
-        simSerial: [
-          `Cannot simulate ${tab.name}.`,
-          'The simulator runs Arduino sketches: a file with setup() and loop() and no main().',
-          // Points at a control the user can reach. The old text named
-          // examples/blink/blink.ino, a path that exists in the Cortex repo and
-          // not in the workspace they have open.
-          'Open a .ino sketch and press Run, or use New sketch on the Welcome screen to get one.'
-        ].map((text) => ({ text, kind: 'system' as const }))
+        simSerial: [],
+        simBlock: {
+          reason: 'not-sketch',
+          path: activePath,
+          lines: [
+            `Cannot simulate ${tab.name}.`,
+            'The simulator runs Arduino sketches: a file with setup() and loop() and no main().',
+            // Points at a control the user can reach. The old text named
+            // examples/blink/blink.ino, a path that exists in the Cortex repo and
+            // not in the workspace they have open.
+            'Open a .ino sketch and press Run, or use New sketch on the Welcome screen to get one.'
+          ]
+        }
       })
       return
     }
@@ -1075,12 +1096,26 @@ export const useStore = create<State>((set, get) => ({
       ...SIM_PIN_RESET,
       simInputs: {},
       simSerial: [],
+      simBlock: null,
       mainView: 'simulator'
     })
     try {
       await window.api.simStart({ id, filePath: activePath, cwd, compiler })
     } catch (err) {
       set({ simRunning: false, simSerial: [{ text: `Failed to start simulation: ${String(err)}`, kind: 'system' }] })
+    }
+  },
+  async recheckCompiler() {
+    set({ simRechecking: true })
+    // Force a fresh scan: a user who just installed a compiler needs the cached
+    // detection cleared, exactly what Rescan does.
+    await get().detectToolchains(true)
+    set({ simRechecking: false })
+    const cpp = get().toolchains.find((t) => t.available && isHostCpp(t.command))
+    // Found one: clear the block and run. Still missing: leave the guidance up.
+    if (cpp) {
+      set({ simBlock: null })
+      await get().startSim()
     }
   },
   async stopSim() {

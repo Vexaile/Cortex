@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, lazy, Suspense } from 'react'
 import { Play, Square, CircuitBoard, Plus, Save, AlertTriangle, Radio } from 'lucide-react'
 import { useStore, type SimPartType, type Sim3dBoardId } from '../store/useStore'
 import SimCanvas, { PartGlyph } from './SimCanvas'
+import SimBlockedPanel from './SimBlockedPanel'
 import PanelHeader from './PanelHeader'
 import EmptyState from './EmptyState'
 
@@ -41,11 +42,16 @@ export default function SimulatorView(): JSX.Element {
     tabs,
     selectedFqbn,
     sim3dBoard,
-    setSim3dBoard
+    setSim3dBoard,
+    simBlock
   } = useStore()
   const endRef = useRef<HTMLDivElement>(null)
   const activeTab = tabs.find((t) => t.path === activePath)
   const [view, setView] = useState<'2d' | '3d'>('2d')
+  // The block belongs to the file that raised it. Show it only over that file,
+  // so switching tabs reveals the canvas instead of leaving a stale panel (and a
+  // message that may name a file you already closed) plastered over a valid one.
+  const blocked = !!simBlock && simBlock.path === activePath
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: 'end' })
@@ -156,8 +162,11 @@ export default function SimulatorView(): JSX.Element {
           <button
             key={type}
             onClick={() => addPart(type)}
-            title={`Add ${label}`}
-            className="row shrink-0 gap-1 whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] text-ide-muted hover:bg-ide-hover hover:text-ide-text"
+            title={blocked ? 'Run a sketch first' : `Add ${label}`}
+            // Parts would land on a canvas the blocked panel is covering, so the
+            // palette is inert while blocked rather than silently adding hidden parts.
+            disabled={blocked}
+            className="row shrink-0 gap-1 whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] text-ide-muted hover:bg-ide-hover hover:text-ide-text disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-ide-muted"
           >
             <PartGlyph type={type} size={16} />
             <span className="cq-label">{label}</span>
@@ -172,7 +181,11 @@ export default function SimulatorView(): JSX.Element {
             content-based min-width and pushes the whole app layout wider. */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="relative min-h-0 min-w-0 flex-1">
-            {view === '3d' ? (
+            {blocked ? (
+              // Cannot run (no host compiler, or not a sketch): show a clear,
+              // actionable state instead of a dead canvas + cryptic serial text.
+              <SimBlockedPanel />
+            ) : view === '3d' ? (
               <Suspense
                 fallback={
                   <div className="grid h-full place-items-center text-[12px] text-ide-faint">Loading 3D board...</div>
@@ -183,7 +196,7 @@ export default function SimulatorView(): JSX.Element {
             ) : (
               <SimCanvas />
             )}
-            {simParts.length === 0 && (
+            {!blocked && simParts.length === 0 && (
               <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full border border-ide-border bg-ide-bar/85 px-3 py-1 text-[10px] text-ide-muted">
                 Add a part above, then click it and a board pin to wire it.
               </div>

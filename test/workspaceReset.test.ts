@@ -66,6 +66,7 @@ const WORKSPACE_SCOPED = [
   'simSerial',
   'simInputs',
   'simWiring',
+  'simBlock',
   'simPinStates',
   'simPinPwm',
   'simPinModes',

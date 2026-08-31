@@ -3,6 +3,40 @@
 Newest first. One entry per completed slice: what shipped, how it was verified,
 and what it unblocks. See `CORTEX_IMPLEMENTATION_PLAN.md` for the full plan.
 
+## First-run compiler wall: a friendly, actionable state (Phase 2)
+
+Audit P0: New Sketch opens the Simulator, which compiles the sketch on the host,
+so on a machine with no g++/clang++ it dead-ended with five cryptic lines (a raw
+winget command among them) in the serial pane. Now startSim sets a structured
+`simBlock` and the simulator stage shows a friendly SimBlockedPanel: a headline,
+a per-OS install command with a Copy button, a follow-up note, a Recheck button
+(re-scans the toolchains and runs if a compiler is now found), and a
+documentation link. The OS/command mapping is a pure, unit-tested module
+(`src/shared/compilerHelp.ts`). The not-a-sketch case uses the same friendly
+panel instead of serial text.
+
+Verified live: forcing the compiler-missing state shows the panel with the
+Windows winget command, Recheck, and MSYS2 link; Recheck (with g++ present)
+clears the block and runs the sim. 6 compilerHelp unit tests; workspaceReset
+guard extended to 52; full suite green. Designed with the Taste-Skill honoring
+the existing dense IDE tokens.
+
+A 2-dimension adversarial review ran on the diff; all confirmed findings were
+fixed and re-verified. The main one was a real regression: the block was cleared
+only on a run or a workspace switch, so switching files left the full-height
+panel plastered over a now-valid sketch, with a message that could even name a
+file you had already closed. The fix ties the block to the file that raised it
+(`SimBlock.path`) and renders the panel only while that file is active, so
+switching tabs reveals the canvas and switching back shows the same accurate
+message (verified live: the not-sketch panel appears over its file, disappears
+on switching to another, and reappears on switching back). The follow-ons: the
+"Add a part" wiring hint no longer overlays the blocked panel and the part
+palette is disabled while blocked (parts would land on a hidden canvas); and
+`detectOS` now tests mac/darwin before windows (the substring "win" inside
+"darwin" had made the darwin branch dead code, so a Darwin user agent was
+misread as Windows). Both the block-follows-its-file behavior and the Darwin
+case are now guarded by unit tests.
+
 ## Board Manager URLs: install the ESP32 core in-app (Phase 2)
 
 Audit P0: an ESP32-focused IDE could not install the ESP32 core because there
