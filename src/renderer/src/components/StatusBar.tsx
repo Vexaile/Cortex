@@ -1,4 +1,4 @@
-import { GitBranch, CircleDot, Cpu, Radio, AlertCircle, CheckCircle2, Braces, MemoryStick } from 'lucide-react'
+import { Folder, CircleDot, Cpu, Radio, AlertCircle, CheckCircle2, Braces, MemoryStick } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { langForFile, LSP_SERVER_LABEL, LSP_INSTALL_HINT, LSP_BUSY_HINT } from '@shared/lsp'
 
@@ -41,7 +41,10 @@ export default function StatusBar(): JSX.Element {
       )}
       <div className="row gap-3">
         <span className="row gap-1">
-          <GitBranch size={12} /> {workspaceName || 'no folder'}
+          {/* A folder icon, not a git branch: Cortex has no git integration
+              yet, and a branch glyph here read as a branch indicator that
+              does not exist. This labels the open workspace, nothing more. */}
+          <Folder size={12} /> {workspaceName || 'no folder'}
         </span>
         {/* The running text is cyan, not the identity navy: navy at 11px on
             ide-bar measures 3.59:1 and fails AA, and this is the one status

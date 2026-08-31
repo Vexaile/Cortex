@@ -11,6 +11,27 @@ interface Item {
   run: () => void
 }
 
+/** Drive an action on the focused Monaco editor (format, rename, references,
+ *  go-to-definition). No-op when no editor is mounted, e.g. on the Simulator.
+ *  Some of these (go-to-definition, references) are Monaco commands rather than
+ *  registered EditorActions, so fall back to trigger() when getAction misses. */
+function editorAction(actionId: string): void {
+  const ed = (
+    window as unknown as {
+      __cortexEditor?: {
+        focus(): void
+        getAction(id: string): { run: () => void } | null
+        trigger(source: string, id: string, payload: unknown): void
+      }
+    }
+  ).__cortexEditor
+  if (!ed) return
+  ed.focus()
+  const action = ed.getAction(actionId)
+  if (action) action.run()
+  else ed.trigger('palette', actionId, null)
+}
+
 /** Subsequence fuzzy score; null = no match, higher = better. */
 function fuzzy(query: string, text: string): number | null {
   const q = query.toLowerCase()
@@ -83,6 +104,10 @@ export default function CommandPalette({ mode, onClose }: { mode: PaletteMode; o
       { key: 'ai', label: 'View: Toggle AI Assistant', run: () => s.toggleAi() },
       { key: 'panel', label: 'View: Toggle Bottom Panel', hint: 'Ctrl+`', run: () => s.toggleBottom() },
       { key: 'sidebar', label: 'View: Toggle Sidebar', hint: 'Ctrl+B', run: () => s.toggleSidebar() },
+      { key: 'format', label: 'Editor: Format Document', hint: 'Ctrl+T', run: () => editorAction('editor.action.formatDocument') },
+      { key: 'rename', label: 'Editor: Rename Symbol', hint: 'F2', run: () => editorAction('editor.action.rename') },
+      { key: 'refs', label: 'Editor: Find All References', hint: 'Shift+F12', run: () => editorAction('editor.action.goToReferences') },
+      { key: 'gotodef', label: 'Editor: Go to Definition', hint: 'F12', run: () => editorAction('editor.action.revealDefinition') },
       { key: 'rescan', label: 'Toolchains: Rescan', run: () => void s.detectToolchains(true) }
     ],
     [s]

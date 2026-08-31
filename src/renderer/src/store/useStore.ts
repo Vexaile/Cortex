@@ -388,6 +388,11 @@ interface State {
   setActive: (path: string) => void
   closeTab: (path: string) => void
   updateContent: (path: string, content: string) => void
+  /** Reflect a change made to a file outside the editor (e.g. a rename
+   *  refactor that already rewrote it on disk): set the tab's content AND
+   *  savedContent to the new text, so it shows the change and is not falsely
+   *  marked dirty. No-op if the file has no open tab. */
+  applyExternalEdit: (path: string, content: string) => void
   saveActive: () => Promise<void>
   saveAll: () => Promise<void>
   renameEntry: (path: string, newName: string) => Promise<void>
@@ -796,6 +801,14 @@ export const useStore = create<State>((set, get) => ({
 
   updateContent(path, content) {
     set({ tabs: get().tabs.map((t) => (t.path === path ? { ...t, content } : t)) })
+  },
+
+  applyExternalEdit(path, content) {
+    set({
+      tabs: get().tabs.map((t) =>
+        normPath(t.path) === normPath(path) ? { ...t, content, savedContent: content } : t
+      )
+    })
   },
 
   async saveActive() {

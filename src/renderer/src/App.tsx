@@ -13,6 +13,16 @@ import SimulatorView from './components/SimulatorView'
 import Welcome from './components/Welcome'
 import Splash from './components/Splash'
 
+/** Run an action on the focused Monaco editor (used by the Ctrl+T format
+ *  accelerator). No-op when no editor is mounted. */
+function runEditorAction(actionId: string): void {
+  const ed = (window as unknown as { __cortexEditor?: { focus(): void; getAction(id: string): { run: () => void } | null } })
+    .__cortexEditor
+  if (!ed) return
+  ed.focus()
+  ed.getAction(actionId)?.run()
+}
+
 export default function App(): JSX.Element {
   const {
     workspaceRoot,
@@ -44,7 +54,10 @@ export default function App(): JSX.Element {
     setAiWidth,
     setBottomHeight,
     openWorkspace,
-    removeRecent
+    removeRecent,
+    setSidebar,
+    setBottom,
+    setSerialPlot
   } = useStore()
 
   const [palette, setPalette] = useState<PaletteMode | null>(null)
@@ -142,6 +155,31 @@ export default function App(): JSX.Element {
       } else if (mod && e.key === '`') {
         e.preventDefault()
         toggleBottom()
+      } else if (mod && e.shiftKey && e.key.toLowerCase() === 'm') {
+        // Serial Monitor (the accelerator the Tools menu advertises).
+        e.preventDefault()
+        setSerialPlot(false)
+        setBottom('serial')
+      } else if (mod && e.shiftKey && e.key.toLowerCase() === 'i') {
+        // Manage Libraries (advertised in the Tools menu).
+        e.preventDefault()
+        setSidebar('libraries')
+      } else if (mod && !e.shiftKey && e.key.toLowerCase() === 'o') {
+        // Open Folder (advertised in the File menu).
+        e.preventDefault()
+        void window.api.openFolder().then((d) => {
+          if (d) return openWorkspace(d)
+          return undefined
+        })
+      } else if (mod && e.key === ',') {
+        // Settings (advertised in the File menu).
+        e.preventDefault()
+        setSidebar('settings')
+      } else if (mod && !e.shiftKey && e.key.toLowerCase() === 't') {
+        // Auto Format (advertised in the Sketch menu); real now that a
+        // formatting provider is registered for C/C++/Rust.
+        e.preventDefault()
+        runEditorAction('editor.action.formatDocument')
       } else if (e.key === 'F5') {
         e.preventDefault()
         void runActive()
@@ -149,7 +187,7 @@ export default function App(): JSX.Element {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [saveActive, toggleSidebar, toggleBottom, runActive])
+  }, [saveActive, toggleSidebar, toggleBottom, runActive, setSidebar, setBottom, setSerialPlot, openWorkspace])
 
   // Closing the window used to just discard unsaved tabs. Main intercepts the
   // close once and waits here instead of dropping the window immediately, so

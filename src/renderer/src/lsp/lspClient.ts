@@ -1,5 +1,6 @@
 import type * as monaco from 'monaco-editor'
 import { LSP_LANGUAGE_ID, langForFile, pathToUri, uriToPath, type LspLang } from '@shared/lsp'
+import { applyTextEdits } from '@shared/textEdit'
 import { useStore } from '../store/useStore'
 import pythonStdlib from '@shared/stdlib/python.json'
 import cppStdlib from '@shared/stdlib/cpp.json'
@@ -72,6 +73,25 @@ const toMonacoRange = (r: LspRange): monaco.IRange => ({
   endLineNumber: r.end.line + 1,
   endColumn: r.end.character + 1
 })
+
+/** Same path, ignoring separator style and (Windows) case. */
+function pathKeyEq(a: string, b: string): boolean {
+  return a.replace(/\\/g, '/').toLowerCase() === b.replace(/\\/g, '/').toLowerCase()
+}
+
+/** Flatten an LSP WorkspaceEdit (either shape) into path -> edits. */
+function collectWorkspaceEdit(we: LspWorkspaceEdit): Map<string, LspTextEdit[]> {
+  const out = new Map<string, LspTextEdit[]>()
+  const add = (uri: string, edits: LspTextEdit[]): void => {
+    const p = uriToPath(uri)
+    out.set(p, (out.get(p) ?? []).concat(edits))
+  }
+  if (we.changes) for (const [uri, edits] of Object.entries(we.changes)) add(uri, edits)
+  if (we.documentChanges) {
+    for (const dc of we.documentChanges) if (dc.textDocument?.uri && dc.edits) add(dc.textDocument.uri, dc.edits)
+  }
+  return out
+}
 
 /** LSP CompletionItemKind (1-25) -> Monaco CompletionItemKind. */
 function completionKind(m: Mon, k: number | undefined): monaco.languages.CompletionItemKind {
@@ -414,6 +434,98 @@ function registerProviders(m: Mon): void {
         }
       }
     })
+
+    // Find all references (Shift+F12 / the references peek). Same-file
+    // references resolve fully; cross-file ones list their real location.
+    m.languages.registerReferenceProvider(id, {
+      async provideReferences(model, position, context, token) {
+        const doc = docsByModel.get(model)
+        if (!doc) return []
+        const res = await lspRequest<LspLocation[]>(doc, 'textDocument/references', {
+          textDocument: { uri: doc.uri },
+          position: toLspPos(position),
+          context: { includeDeclaration: context.includeDeclaration }
+        })
+        if (token.isCancellationRequested || !Array.isArray(res)) return []
+        return res.map((l) => ({ uri: m.Uri.parse(l.uri), range: toMonacoRange(l.range) }))
+      }
+    })
+
+    // Document formatting (the previously-dead Auto Format menu item, and
+    // Shift+Alt+F). clangd and rust-analyzer format; pyright has no formatter
+    // and simply returns nothing, so this is a real no-op there rather than a
+    // broken action.
+    m.languages.registerDocumentFormattingEditProvider(id, {
+      async provideDocumentFormattingEdits(model, options, token) {
+        const doc = docsByModel.get(model)
+        if (!doc) return []
+        const res = await lspRequest<LspTextEdit[]>(doc, 'textDocument/formatting', {
+          textDocument: { uri: doc.uri },
+          options: { tabSize: options.tabSize, insertSpaces: options.insertSpaces }
+        })
+        if (token.isCancellationRequested || !Array.isArray(res)) return []
+        return res.map((e) => ({ range: toMonacoRange(e.range), text: e.newText }))
+      }
+    })
+
+    // Rename symbol (F2). The server only knows the ACTIVE file's live buffer,
+    // so applying its edits to another file that has unsaved changes could land
+    // them at stale offsets. Rather than risk a bad edit, we refuse that case;
+    // otherwise the active file's edits go through Monaco (undoable) and every
+    // other affected file is rewritten on disk and its open tab kept in sync.
+    m.languages.registerRenameProvider(id, {
+      async provideRenameEdits(model, position, newName, token) {
+        const doc = docsByModel.get(model)
+        if (!doc) return { edits: [] }
+        const res = await lspRequest<LspWorkspaceEdit>(doc, 'textDocument/rename', {
+          textDocument: { uri: doc.uri },
+          position: toLspPos(position),
+          newName
+        })
+        if (token.isCancellationRequested || !res) return { edits: [] }
+        const byPath = collectWorkspaceEdit(res)
+        if (byPath.size === 0) return { edits: [], rejectReason: 'This symbol cannot be renamed here.' }
+
+        const store = useStore.getState()
+        for (const p of byPath.keys()) {
+          if (pathKeyEq(p, doc.path)) continue
+          const tab = store.tabs.find((t) => pathKeyEq(t.path, p))
+          if (tab && tab.content !== tab.savedContent) {
+            return { edits: [], rejectReason: `Save changes in ${p.split(/[\\/]/).pop()} before renaming across files.` }
+          }
+        }
+
+        let activeEdits: LspTextEdit[] = []
+        for (const [p, edits] of byPath) {
+          if (pathKeyEq(p, doc.path)) {
+            activeEdits = edits
+            continue
+          }
+          try {
+            const tab = store.tabs.find((t) => pathKeyEq(t.path, p))
+            let base: string
+            if (tab) base = tab.savedContent
+            else {
+              const read = await window.api.readFile(p)
+              base = read.kind === 'text' ? read.content : ''
+            }
+            const next = applyTextEdits(base, edits)
+            await window.api.writeFile(p, next)
+            if (tab) store.applyExternalEdit(p, next)
+          } catch {
+            /* skip an unreadable target rather than fail the whole rename */
+          }
+        }
+        if (token.isCancellationRequested) return { edits: [] }
+        return {
+          edits: activeEdits.map((e) => ({
+            resource: model.uri,
+            textEdit: { range: toMonacoRange(e.range), text: e.newText },
+            versionId: undefined
+          }))
+        }
+      }
+    })
   }
 }
 
@@ -581,6 +693,14 @@ interface LspCompletion {
 interface LspLocation {
   uri: string
   range: LspRange
+}
+interface LspTextEdit {
+  range: LspRange
+  newText: string
+}
+interface LspWorkspaceEdit {
+  changes?: Record<string, LspTextEdit[]>
+  documentChanges?: Array<{ textDocument?: { uri: string }; edits?: LspTextEdit[] }>
 }
 interface LspLocationLink {
   targetUri: string
