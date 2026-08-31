@@ -1,6 +1,7 @@
 import { app, safeStorage } from 'electron'
 import { promises as fs } from 'fs'
 import { join } from 'path'
+import { DEFAULT_BOARD_URLS } from '../../shared/boardUrls'
 
 export interface Settings {
   theme: 'dark' | 'light'
@@ -15,6 +16,12 @@ export interface Settings {
   }
   serial: {
     baudRate: number
+  }
+  boards: {
+    /** Extra arduino-cli board-manager index URLs (the "Additional Boards
+     *  Manager URLs" of the Arduino IDE). Without the ESP32/ESP8266 index here,
+     *  arduino-cli cannot see or install those cores. */
+    additionalUrls: string[]
   }
 }
 
@@ -37,7 +44,11 @@ const DEFAULTS: Settings = {
   // Ollama the moment someone picked the local provider. aiService fills in a
   // per-provider default when this is blank.
   ai: { provider: 'none', model: '', apiKey: '', baseUrl: '' },
-  serial: { baudRate: 115200 }
+  serial: { baudRate: 115200 },
+  // Pre-seeded so ESP32 works out of the box: an ESP32-focused IDE that could
+  // not install the ESP32 core without the user first hunting down an index URL
+  // was the single most common first-run wall in the audit.
+  boards: { additionalUrls: [...DEFAULT_BOARD_URLS] }
 }
 
 function settingsPath(): string {
@@ -62,7 +73,7 @@ function decryptStored(stored: string, encrypted: boolean): string {
 /** Full settings including the decrypted API key. Main-process use only. */
 export async function getSettings(): Promise<Settings> {
   if (cached) return cached
-  let next: Settings = { ...DEFAULTS, ai: { ...DEFAULTS.ai }, serial: { ...DEFAULTS.serial } }
+  let next: Settings = { ...DEFAULTS, ai: { ...DEFAULTS.ai }, serial: { ...DEFAULTS.serial }, boards: { ...DEFAULTS.boards } }
   try {
     const raw = await fs.readFile(settingsPath(), 'utf8')
     const p = JSON.parse(raw)
@@ -74,13 +85,19 @@ export async function getSettings(): Promise<Settings> {
     }
     // Migration: an older plaintext apiKey field is honored once, then re-encrypted on next save.
     if (!ai.apiKey && typeof p.ai?.apiKey === 'string') ai.apiKey = p.ai.apiKey
+    // Keep only well-formed http(s) URLs from disk. A stored file is only as
+    // trustworthy as whatever last wrote it, and these are passed to arduino-cli.
+    const storedUrls = Array.isArray(p.boards?.additionalUrls)
+      ? (p.boards.additionalUrls as unknown[]).filter((u): u is string => typeof u === 'string')
+      : DEFAULTS.boards.additionalUrls
     next = {
       theme: p.theme ?? DEFAULTS.theme,
       defaultCppCompiler: p.defaultCppCompiler ?? DEFAULTS.defaultCppCompiler,
       defaultCppStandard: p.defaultCppStandard ?? DEFAULTS.defaultCppStandard,
       pythonPath: p.pythonPath ?? DEFAULTS.pythonPath,
       ai,
-      serial: { ...DEFAULTS.serial, ...p.serial }
+      serial: { ...DEFAULTS.serial, ...p.serial },
+      boards: { additionalUrls: storedUrls }
     }
   } catch {
     /* no file yet: defaults */
@@ -103,7 +120,13 @@ export async function setSettings(patch: Partial<Settings>): Promise<PublicSetti
   const incoming = patch.ai?.apiKey
   mergedAi.apiKey = typeof incoming === 'string' && incoming.trim() !== '' ? incoming : current.ai.apiKey
 
-  const next: Settings = { ...current, ...patch, ai: mergedAi, serial: { ...current.serial, ...patch.serial } }
+  const next: Settings = {
+    ...current,
+    ...patch,
+    ai: mergedAi,
+    serial: { ...current.serial, ...patch.serial },
+    boards: { ...current.boards, ...patch.boards }
+  }
   cached = next
 
   const persistedAi: Record<string, unknown> = {
@@ -128,7 +151,8 @@ export async function setSettings(patch: Partial<Settings>): Promise<PublicSetti
     defaultCppStandard: next.defaultCppStandard,
     pythonPath: next.pythonPath,
     ai: persistedAi,
-    serial: next.serial
+    serial: next.serial,
+    boards: next.boards
   }
   await fs.writeFile(settingsPath(), JSON.stringify(persisted, null, 2), 'utf8')
   return getPublicSettings()

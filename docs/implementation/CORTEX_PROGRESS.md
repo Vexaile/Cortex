@@ -3,6 +3,33 @@
 Newest first. One entry per completed slice: what shipped, how it was verified,
 and what it unblocks. See `CORTEX_IMPLEMENTATION_PLAN.md` for the full plan.
 
+## Board Manager URLs: install the ESP32 core in-app (Phase 2)
+
+Audit P0: an ESP32-focused IDE could not install the ESP32 core because there
+was no way to register arduino-cli board-index URLs, so only Arduino-maintained
+cores appeared. Added a persisted `boards.additionalUrls` setting, pre-seeded
+with the Espressif ESP32 and ESP8266 index URLs, threaded into every core
+command (search, list, install, update-index) as a single joined
+`--additional-urls` argument (a hostile entry can never be read as a separate
+flag; only http/https URLs pass). A Settings section lists the URLs with add/
+remove. The pure URL logic lives in `src/shared/boardUrls.ts` and is unit-tested.
+
+Verified live: `arduino-cli core search esp32 --additional-urls <esp32>` and the
+app's own `coreSearch('esp32')` now return `esp32:esp32` (the real Espressif
+core), which was absent before; the seeded URLs show in Settings. 7 boardUrls
+unit tests; full suite green (565).
+
+A 3-dimension adversarial review ran on the diff; all confirmed findings were
+fixed and re-verified: URL validation now rejects commas/whitespace (a comma is
+arduino-cli's own --additional-urls separator, so a comma inside one entry could
+have smuggled a non-http index of any scheme past the http/https check);
+coreSearch falls back to a search without the extra URLs when an added or
+uncached index is unreachable, so a bad or offline URL no longer empties the
+whole Boards Manager (verified: with an unreachable URL, `avr` still lists 7
+built-in cores); the add/remove handlers read the current URL array from the
+store to avoid a stale-closure race; and the settings hint no longer overstates
+a manual Update Index step (a new URL takes effect on the next search/install).
+
 ## Split / draggable editor tabs (Phase 1)
 
 The requested feature: with two files open, drag a tab to the side to view both

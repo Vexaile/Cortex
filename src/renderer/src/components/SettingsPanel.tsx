@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { RefreshCw, CheckCircle2, XCircle } from 'lucide-react'
+import { RefreshCw, CheckCircle2, XCircle, X, Plus } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import PanelHeader from './PanelHeader'
+import { isValidIndexUrl } from '@shared/boardUrls'
 import type { ToolchainInfo } from '@shared/ipc'
 
 const KIND_LABEL: Record<ToolchainInfo['kind'], string> = {
@@ -78,6 +79,22 @@ export default function SettingsPanel(): JSX.Element {
   // and commit it explicitly.
   const [keyDraft, setKeyDraft] = useState('')
   const [keySaved, setKeySaved] = useState(false)
+  const [urlDraft, setUrlDraft] = useState('')
+
+  const boardUrls = settings?.boards?.additionalUrls ?? []
+  // Read the current array from the store (not the render closure) so two quick
+  // edits before the async save resolves do not clobber each other.
+  const currentUrls = (): string[] => useStore.getState().settings?.boards?.additionalUrls ?? []
+  const addBoardUrl = (): void => {
+    const u = urlDraft.trim()
+    if (!isValidIndexUrl(u)) return // not a valid http(s) index URL: ignore rather than persist garbage
+    const urls = currentUrls()
+    if (!urls.includes(u)) void updateSettings({ boards: { additionalUrls: [...urls, u] } })
+    setUrlDraft('')
+  }
+  const removeBoardUrl = (u: string): void => {
+    void updateSettings({ boards: { additionalUrls: currentUrls().filter((x) => x !== u) } })
+  }
 
   useEffect(() => {
     if (!settings) void loadSettings()
@@ -159,6 +176,52 @@ export default function SettingsPanel(): JSX.Element {
               ))}
             </div>
           )}
+        </section>
+
+        <section className="space-y-2">
+          <h4 className="text-[11px] font-semibold uppercase tracking-wider text-ide-faint">Board Manager URLs</h4>
+          <p className="text-[10px] leading-relaxed text-ide-faint">
+            Extra package index URLs for the Boards Manager. ESP32 and ESP8266 are included by default. A new URL takes
+            effect the next time you search or install a core.
+          </p>
+          <div className="space-y-1 rounded border border-ide-border bg-ide-bg p-2">
+            {boardUrls.length === 0 ? (
+              <div className="text-[11px] text-ide-faint">No additional URLs.</div>
+            ) : (
+              boardUrls.map((u) => (
+                <div key={u} className="row justify-between gap-2 text-[11px]">
+                  <span className="mono min-w-0 truncate text-ide-muted" title={u}>
+                    {u}
+                  </span>
+                  <button
+                    className="shrink-0 rounded p-0.5 text-ide-faint hover:bg-ide-hover hover:text-ide-text"
+                    title="Remove"
+                    onClick={() => removeBoardUrl(u)}
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+          <div className="row gap-1.5">
+            <input
+              className={input}
+              value={urlDraft}
+              placeholder="https://.../package_..._index.json"
+              onChange={(e) => setUrlDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') addBoardUrl()
+              }}
+            />
+            <button
+              className="btn btn-accent row shrink-0 gap-1 text-[11px] disabled:opacity-40"
+              disabled={!urlDraft.trim()}
+              onClick={addBoardUrl}
+            >
+              <Plus size={12} /> Add
+            </button>
+          </div>
         </section>
 
         <section className="space-y-2">

@@ -262,6 +262,7 @@ export interface AppSettings {
     apiKeySet?: boolean
   }
   serial: { baudRate: number }
+  boards: { additionalUrls: string[] }
 }
 
 export type SidebarView =

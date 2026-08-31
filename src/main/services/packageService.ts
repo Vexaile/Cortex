@@ -3,9 +3,19 @@ import { promisify } from 'util'
 import type { BrowserWindow } from 'electron'
 import type { CorePlatform, LibPackage, PackageInstallRequest } from '../../shared/ipc'
 import * as runner from './runnerService'
+import { getSettings } from './settingsService'
+import { buildAdditionalUrlArgs } from '../../shared/boardUrls'
 
 const execFileAsync = promisify(execFile)
 const CLI = 'arduino-cli'
+
+async function additionalUrlArgs(): Promise<string[]> {
+  try {
+    return buildAdditionalUrlArgs((await getSettings()).boards.additionalUrls)
+  } catch {
+    return []
+  }
+}
 
 // arduino-cli runs without a daemon here, so every call re-reads the package
 // index from disk: a search takes ~13s on its own and longer while a concurrent
@@ -114,21 +124,40 @@ function readPlatforms(stdout: string): CorePlatform[] {
   }
 }
 
-/** Search installable cores (empty query lists the whole index). */
+/** Search installable cores (empty query lists the whole index). The vendor
+ *  index URLs are what make third-party cores (esp32, esp8266) show up here. */
 export async function coreSearch(query: string): Promise<CorePlatform[]> {
-  try {
-    const args = ['core', 'search', ...(query ? [query] : []), '--format', 'json']
-    const { stdout } = await execFileAsync(CLI, args, { timeout: SEARCH_TIMEOUT, windowsHide: true, maxBuffer: 1 << 24 })
+  const base = ['core', 'search', ...(query ? [query] : [])]
+  const extra = await additionalUrlArgs()
+  const run = async (args: string[]): Promise<CorePlatform[]> => {
+    const { stdout } = await execFileAsync(CLI, [...args, '--format', 'json'], {
+      timeout: SEARCH_TIMEOUT,
+      windowsHide: true,
+      maxBuffer: 1 << 24
+    })
     return readPlatforms(stdout.toString())
+  }
+  try {
+    return await run([...base, ...extra])
   } catch {
-    return []
+    // arduino-cli aborts the ENTIRE search when any additional index cannot be
+    // downloaded or read (offline, or a wrong URL), dropping even the built-in
+    // cores. Retry without the extra URLs so the built-in cores still list,
+    // rather than showing an empty "No cores found" for every query.
+    if (extra.length === 0) return []
+    try {
+      return await run(base)
+    } catch {
+      return []
+    }
   }
 }
 
 /** Installed cores (so the UI can show version + a Remove action). */
 export async function coreInstalled(): Promise<CorePlatform[]> {
   try {
-    const { stdout } = await execFileAsync(CLI, ['core', 'list', '--format', 'json'], {
+    const args = ['core', 'list', ...(await additionalUrlArgs()), '--format', 'json']
+    const { stdout } = await execFileAsync(CLI, args, {
       timeout: LIST_TIMEOUT,
       windowsHide: true,
       maxBuffer: 1 << 24
@@ -237,15 +266,19 @@ function stream(win: BrowserWindow, id: string, args: string[]): void {
   })
 }
 
-export function coreInstall(win: BrowserWindow, req: PackageInstallRequest): void {
+export async function coreInstall(win: BrowserWindow, req: PackageInstallRequest): Promise<void> {
   const target = req.version ? `${req.name}@${req.version}` : req.name
-  stream(win, req.id, ['core', 'install', '--', target])
+  // The vendor URLs must be present here too, or installing esp32:esp32 fails
+  // with "platform not found" even after it appeared in search.
+  stream(win, req.id, ['core', 'install', ...(await additionalUrlArgs()), '--', target])
 }
 export function coreUninstall(win: BrowserWindow, id: string, coreId: string): void {
   stream(win, id, ['core', 'uninstall', '--', coreId])
 }
-export function coreUpdateIndex(win: BrowserWindow, id: string): void {
-  stream(win, id, ['core', 'update-index'])
+export async function coreUpdateIndex(win: BrowserWindow, id: string): Promise<void> {
+  // This is the call that actually fetches the espressif/esp8266 indexes named
+  // by the additional URLs, so those cores become searchable and installable.
+  stream(win, id, ['core', 'update-index', ...(await additionalUrlArgs())])
 }
 export function libInstall(win: BrowserWindow, req: PackageInstallRequest): void {
   const target = req.version ? `${req.name}@${req.version}` : req.name
