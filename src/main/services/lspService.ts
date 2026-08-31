@@ -37,6 +37,47 @@ const REQUEST_TIMEOUT_MS = 20000
 const MAX_CRASHES = 3
 const CRASH_WINDOW_MS = 60000
 
+// Per-language settings, pushed to the server as workspace/didChangeConfiguration
+// and served back whenever it pulls via workspace/configuration (we answered
+// every pull with `{}` before, which is why pyright ran on bare defaults:
+// reportUnusedVariable/reportUnusedClass/reportUnusedFunction all off in its
+// default "basic" severity table). Verified against the real pyright source
+// (node_modules/pyright/dist), not assumed: reportUnusedVariable and its
+// siblings are genuine pyright diagnostic rules. `completeFunctionParens` is
+// NOT - that one only exists in Pylance (Microsoft's closed-source VS Code
+// extension built on pyright), confirmed absent from pyright's own bundle, so
+// it's deliberately not here; parens-on-completion is handled client-side in
+// lspClient.ts's completion mapping instead, which works for every server.
+const LANG_SETTINGS: Partial<Record<LspLang, Record<string, unknown>>> = {
+  python: {
+    python: {
+      analysis: {
+        diagnosticSeverityOverrides: {
+          reportUnusedVariable: 'warning',
+          reportUnusedClass: 'warning',
+          reportUnusedFunction: 'warning',
+          reportUnusedImport: 'warning',
+          reportUnusedExpression: 'warning'
+        }
+      }
+    }
+  }
+}
+
+/** Walk a dot-separated `workspace/configuration` section against the settings
+ * tree above. An unknown section (or no settings for this language) resolves
+ * to `{}`, matching what a real settings store returns for an unset key. */
+function resolveConfigSection(tree: Record<string, unknown> | undefined, section: string | undefined): unknown {
+  if (!tree) return {}
+  if (!section) return tree
+  let cur: unknown = tree
+  for (const part of section.split('.')) {
+    if (typeof cur !== 'object' || cur === null) return {}
+    cur = (cur as Record<string, unknown>)[part]
+  }
+  return cur ?? {}
+}
+
 interface Pending {
   resolve: (v: unknown) => void
   reject: (e: unknown) => void
@@ -146,6 +187,11 @@ class LspServer {
       this.pending.set(id, {
         resolve: () => {
           this.send({ jsonrpc: '2.0', method: 'initialized', params: {} })
+          const settings = LANG_SETTINGS[this.lang]
+          // Push proactively too, not just answer pulls: a server that only
+          // asks for config lazily (on first relevant request) would otherwise
+          // analyse the first file or two on bare defaults.
+          if (settings) this.send({ jsonrpc: '2.0', method: 'workspace/didChangeConfiguration', params: { settings } })
           this.initialized = true
           resolve()
         },
@@ -225,9 +271,16 @@ class LspServer {
       return
     }
     // A server -> client REQUEST (has id AND method). Answer minimally so the
-    // server does not stall waiting: empty config, no dynamic registration.
+    // server does not stall waiting: real per-language settings for a
+    // workspace/configuration pull (see LANG_SETTINGS), no dynamic registration.
     if (msg.id !== undefined && msg.method) {
-      const result = msg.method === 'workspace/configuration' ? (msg.params?.items ?? []).map(() => ({})) : null
+      const settings = LANG_SETTINGS[this.lang]
+      const result =
+        msg.method === 'workspace/configuration'
+          ? ((msg.params?.items ?? []) as Array<{ section?: string }>).map((it) =>
+              resolveConfigSection(settings, it.section)
+            )
+          : null
       this.send({ jsonrpc: '2.0', id: msg.id, result })
     }
     // Other notifications (window/logMessage, $/progress) are ignored.

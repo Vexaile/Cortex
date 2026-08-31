@@ -1,0 +1,32 @@
+{
+  "def": {
+    "label": "def",
+    "description": "Function definition.",
+    "insertText": "def ${1:name}(${2:args}):\n\t$0"
+  },
+  "class": {
+    "label": "class",
+    "description": "Class definition with an __init__ constructor.",
+    "insertText": "class ${1:ClassName}:\n\tdef __init__(self${2:, args}):\n\t\t$0"
+  },
+  "for": {
+    "label": "for",
+    "description": "For loop over an iterable.",
+    "insertText": "for ${1:item} in ${2:iterable}:\n\t$0"
+  },
+  "while": {
+    "label": "while",
+    "description": "While loop.",
+    "insertText": "while ${1:condition}:\n\t$0"
+  },
+  "ifmain": {
+    "label": "if __name__",
+    "description": "Entry-point guard: this block only runs when the file is executed directly, not when it's imported.",
+    "insertText": "if __name__ == \"__main__\":\n\t$0"
+  },
+  "try": {
+    "label": "try/except",
+    "description": "Exception handling block.",
+    "insertText": "try:\n\t$0\nexcept ${1:Exception} as e:\n\t"
+  }
+}

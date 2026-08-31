@@ -1,0 +1,94 @@
+{
+  "vector": {
+    "docUrl": "https://en.cppreference.com/w/cpp/container/vector",
+    "since": null,
+    "symbols": {
+      "push_back": {
+        "signature": "void push_back(const T& value)",
+        "description": "Appends a copy of value to the end of the container, growing its capacity (reallocating and invalidating iterators/references) if needed.",
+        "example": "std::vector<int> v;\nv.push_back(1);\nv.push_back(2);",
+        "docUrl": "https://en.cppreference.com/w/cpp/container/vector/push_back"
+      },
+      "pop_back": {
+        "signature": "void pop_back()",
+        "description": "Removes the last element. Calling this on an empty vector is undefined behavior - check empty() first if the vector could be empty.",
+        "example": "if (!v.empty()) v.pop_back();",
+        "docUrl": "https://en.cppreference.com/w/cpp/container/vector/pop_back"
+      },
+      "size": {
+        "signature": "size_type size() const",
+        "description": "Returns the number of elements currently held, not the allocated capacity. O(1).",
+        "example": "for (size_t i = 0; i < v.size(); ++i) { ... }",
+        "docUrl": "https://en.cppreference.com/w/cpp/container/vector/size"
+      },
+      "empty": {
+        "signature": "bool empty() const",
+        "description": "Returns true if the vector has no elements. Prefer this over checking size() == 0 - it's the idiomatic form and works the same way across every standard container.",
+        "example": "if (v.empty()) { return; }",
+        "docUrl": "https://en.cppreference.com/w/cpp/container/vector/empty"
+      },
+      "at": {
+        "signature": "reference at(size_type pos)",
+        "description": "Bounds-checked element access: throws std::out_of_range if pos is invalid, unlike operator[] which is undefined behavior on an out-of-range index.",
+        "example": "try {\n    int x = v.at(10);\n} catch (const std::out_of_range&) { ... }",
+        "docUrl": "https://en.cppreference.com/w/cpp/container/vector/at"
+      },
+      "clear": {
+        "signature": "void clear()",
+        "description": "Destroys every element, leaving size() == 0. Capacity is unspecified but typically unchanged, so it does NOT necessarily free the underlying allocation (use shrink_to_fit() for that).",
+        "example": "v.clear();\nassert(v.empty());",
+        "docUrl": "https://en.cppreference.com/w/cpp/container/vector/clear"
+      },
+      "insert": {
+        "signature": "iterator insert(const_iterator pos, const T& value)",
+        "description": "Inserts value before pos, shifting every following element - O(n) in the distance from pos to the end. Invalidates iterators at or after the insertion point.",
+        "example": "v.insert(v.begin(), 0);  // prepend",
+        "docUrl": "https://en.cppreference.com/w/cpp/container/vector/insert"
+      },
+      "erase": {
+        "signature": "iterator erase(const_iterator pos)",
+        "description": "Removes the element at pos, shifting following elements down - O(n). Returns an iterator to the element that followed the erased one.",
+        "example": "v.erase(v.begin());  // remove the first element",
+        "docUrl": "https://en.cppreference.com/w/cpp/container/vector/erase"
+      },
+      "reserve": {
+        "signature": "void reserve(size_type new_cap)",
+        "description": "Pre-allocates capacity for at least new_cap elements without changing size(). Useful before a loop of many push_back calls, to avoid repeated reallocation.",
+        "example": "v.reserve(1000);\nfor (int i = 0; i < 1000; ++i) v.push_back(i);",
+        "docUrl": "https://en.cppreference.com/w/cpp/container/vector/reserve"
+      },
+      "front": {
+        "signature": "reference front()",
+        "description": "Returns a reference to the first element. Undefined behavior if the vector is empty.",
+        "example": "int first = v.front();",
+        "docUrl": "https://en.cppreference.com/w/cpp/container/vector/front"
+      },
+      "back": {
+        "signature": "reference back()",
+        "description": "Returns a reference to the last element. Undefined behavior if the vector is empty.",
+        "example": "int last = v.back();",
+        "docUrl": "https://en.cppreference.com/w/cpp/container/vector/back"
+      }
+    }
+  },
+  "chrono": {
+    "docUrl": "https://en.cppreference.com/w/cpp/header/chrono",
+    "since": "c++11",
+    "symbols": {
+      "duration_cast": {
+        "signature": "template<class ToDuration, class Rep, class Period> constexpr ToDuration duration_cast(const duration<Rep, Period>& d)",
+        "description": "Converts a duration to another duration type, truncating toward zero (e.g. milliseconds -> seconds drops the fractional part rather than rounding).",
+        "example": "auto ms = std::chrono::milliseconds(1500);\nauto s = std::chrono::duration_cast<std::chrono::seconds>(ms);  // 1s",
+        "since": "c++11",
+        "docUrl": "https://en.cppreference.com/w/cpp/chrono/duration/duration_cast"
+      },
+      "steady_clock": {
+        "signature": "class std::chrono::steady_clock",
+        "description": "A monotonic clock that never gets adjusted (no NTP jumps, no DST). Use this, not system_clock, for measuring elapsed time or intervals.",
+        "example": "auto t0 = std::chrono::steady_clock::now();\n/* work */\nauto elapsed = std::chrono::steady_clock::now() - t0;",
+        "since": "c++11",
+        "docUrl": "https://en.cppreference.com/w/cpp/chrono/steady_clock"
+      }
+    }
+  }
+}

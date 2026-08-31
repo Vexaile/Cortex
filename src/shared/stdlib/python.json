@@ -1,0 +1,128 @@
+{
+  "time": {
+    "docUrl": "https://docs.python.org/3/library/time.html",
+    "since": null,
+    "symbols": {
+      "time": {
+        "signature": "time.time() -> float",
+        "description": "Returns the current time in seconds since the epoch, as a float. Has no guaranteed resolution below 1 second on some platforms; use perf_counter() instead when measuring elapsed time.",
+        "example": "start = time.time()\n...\nelapsed = time.time() - start",
+        "docUrl": "https://docs.python.org/3/library/time.html#time.time"
+      },
+      "sleep": {
+        "signature": "time.sleep(seconds: float) -> None",
+        "description": "Suspends the calling thread for the given number of seconds (fractional values are allowed). The actual suspension may be longer than requested by an arbitrary amount, because of scheduling by other threads or the OS.",
+        "example": "time.sleep(0.5)  # pause for half a second",
+        "docUrl": "https://docs.python.org/3/library/time.html#time.sleep"
+      },
+      "asctime": {
+        "signature": "time.asctime(t: struct_time | None = None) -> str",
+        "description": "Converts a struct_time (as returned by localtime()/gmtime(), or the current time if t is omitted) into a fixed-format 24-character string, e.g. 'Sun Jun 20 23:21:05 1993'.",
+        "example": "time.asctime(time.localtime())",
+        "docUrl": "https://docs.python.org/3/library/time.html#time.asctime"
+      },
+      "strftime": {
+        "signature": "time.strftime(format: str, t: struct_time | None = None) -> str",
+        "description": "Formats a struct_time (or the current time if t is omitted) according to a format string using the same directives as datetime.strftime (%Y, %m, %d, %H, %M, %S, ...).",
+        "example": "time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())",
+        "docUrl": "https://docs.python.org/3/library/time.html#time.strftime"
+      },
+      "strptime": {
+        "signature": "time.strptime(s: str, format: str = '%a %b %d %H:%M:%S %Y') -> struct_time",
+        "description": "Parses a string into a struct_time according to a format string. The inverse of strftime(). Raises ValueError if the string doesn't match the format.",
+        "example": "time.strptime('2024-01-15', '%Y-%m-%d')",
+        "docUrl": "https://docs.python.org/3/library/time.html#time.strptime"
+      },
+      "localtime": {
+        "signature": "time.localtime(secs: float | None = None) -> struct_time",
+        "description": "Converts seconds since the epoch (or now, if omitted) to a struct_time in local time, accounting for the local timezone and DST.",
+        "example": "now = time.localtime()\nprint(now.tm_year, now.tm_hour)",
+        "docUrl": "https://docs.python.org/3/library/time.html#time.localtime"
+      },
+      "gmtime": {
+        "signature": "time.gmtime(secs: float | None = None) -> struct_time",
+        "description": "Converts seconds since the epoch (or now, if omitted) to a struct_time in UTC, where tm_isdst is always 0.",
+        "example": "utc_now = time.gmtime()",
+        "docUrl": "https://docs.python.org/3/library/time.html#time.gmtime"
+      },
+      "mktime": {
+        "signature": "time.mktime(t: struct_time) -> float",
+        "description": "The inverse of localtime(): takes a struct_time expressed in local time and returns the corresponding seconds-since-epoch float.",
+        "example": "time.mktime(time.localtime())",
+        "docUrl": "https://docs.python.org/3/library/time.html#time.mktime"
+      },
+      "perf_counter": {
+        "signature": "time.perf_counter() -> float",
+        "description": "A clock with the highest available resolution, meant specifically for measuring short durations. Has no defined relation to wall-clock time, so only differences between two calls are meaningful.",
+        "example": "t0 = time.perf_counter()\ndo_work()\nprint(time.perf_counter() - t0)",
+        "docUrl": "https://docs.python.org/3/library/time.html#time.perf_counter"
+      },
+      "monotonic": {
+        "signature": "time.monotonic() -> float",
+        "description": "A clock that never goes backwards, even if the system clock is adjusted. Good for measuring elapsed time across a period where the wall clock might change (NTP sync, DST, manual adjustment).",
+        "example": "start = time.monotonic()\n...\nduration = time.monotonic() - start",
+        "docUrl": "https://docs.python.org/3/library/time.html#time.monotonic"
+      }
+    }
+  },
+  "os": {
+    "docUrl": "https://docs.python.org/3/library/os.html",
+    "since": null,
+    "symbols": {
+      "getcwd": {
+        "signature": "os.getcwd() -> str",
+        "description": "Returns the absolute path of the current working directory.",
+        "example": "cwd = os.getcwd()",
+        "docUrl": "https://docs.python.org/3/library/os.html#os.getcwd"
+      },
+      "listdir": {
+        "signature": "os.listdir(path: str = '.') -> list[str]",
+        "description": "Returns a list of entry names in the given directory (or the current directory if omitted), excluding '.' and '..'. Order is arbitrary.",
+        "example": "for name in os.listdir('.'):\n    print(name)",
+        "docUrl": "https://docs.python.org/3/library/os.html#os.listdir"
+      },
+      "makedirs": {
+        "signature": "os.makedirs(name: str, exist_ok: bool = False) -> None",
+        "description": "Creates a directory recursively, making any missing intermediate directories along the way. Raises FileExistsError on the final component unless exist_ok is True.",
+        "example": "os.makedirs('a/b/c', exist_ok=True)",
+        "docUrl": "https://docs.python.org/3/library/os.html#os.makedirs"
+      },
+      "environ": {
+        "signature": "os.environ: MutableMapping[str, str]",
+        "description": "A dict-like mapping of the process's environment variables. Modifying it also updates the actual environment seen by child processes spawned afterward.",
+        "example": "path = os.environ.get('PATH', '')",
+        "docUrl": "https://docs.python.org/3/library/os.html#os.environ"
+      }
+    }
+  },
+  "random": {
+    "docUrl": "https://docs.python.org/3/library/random.html",
+    "since": null,
+    "symbols": {
+      "randint": {
+        "signature": "random.randint(a: int, b: int) -> int",
+        "description": "Returns a random integer N such that a <= N <= b (both endpoints inclusive).",
+        "example": "dice_roll = random.randint(1, 6)",
+        "docUrl": "https://docs.python.org/3/library/random.html#random.randint"
+      },
+      "choice": {
+        "signature": "random.choice(seq: Sequence[T]) -> T",
+        "description": "Returns a random element from a non-empty sequence. Raises IndexError if the sequence is empty.",
+        "example": "random.choice(['red', 'green', 'blue'])",
+        "docUrl": "https://docs.python.org/3/library/random.html#random.choice"
+      },
+      "shuffle": {
+        "signature": "random.shuffle(x: MutableSequence) -> None",
+        "description": "Shuffles a mutable sequence in place. Does not return a new list - the original is reordered.",
+        "example": "cards = [1, 2, 3, 4, 5]\nrandom.shuffle(cards)",
+        "docUrl": "https://docs.python.org/3/library/random.html#random.shuffle"
+      },
+      "uniform": {
+        "signature": "random.uniform(a: float, b: float) -> float",
+        "description": "Returns a random float N such that a <= N <= b, with the exact endpoint inclusion depending on floating-point rounding.",
+        "example": "temperature = random.uniform(20.0, 25.0)",
+        "docUrl": "https://docs.python.org/3/library/random.html#random.uniform"
+      }
+    }
+  }
+}

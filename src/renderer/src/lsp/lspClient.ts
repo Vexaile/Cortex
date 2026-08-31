@@ -1,6 +1,10 @@
 import type * as monaco from 'monaco-editor'
 import { LSP_LANGUAGE_ID, langForFile, pathToUri, uriToPath, type LspLang } from '@shared/lsp'
 import { useStore } from '../store/useStore'
+import pythonStdlib from '@shared/stdlib/python.json'
+import cppStdlib from '@shared/stdlib/cpp.json'
+import pythonSnippets from '@shared/stdlib/python-snippets.json'
+import cppSnippets from '@shared/stdlib/cpp-snippets.json'
 
 /**
  * Stable key for a document, independent of how a URI was encoded or cased.
@@ -124,6 +128,122 @@ function friendlyDetail(m: Mon, it: LspCompletion, lang: LspLang): string | unde
   return it.detail
 }
 
+// ---- supplemental stdlib dictionary -----------------------------------
+// A hand-curated description/example/doc-link for symbols whose LSP-provided
+// documentation is real but too bare to be useful (a lot of typeshed stubs
+// carry a signature and no docstring at all - see docs/STDLIB-DICTIONARY-WORKFLOW.md
+// for the ongoing curation process). This only ever ADDS to what the server
+// already said; it never replaces or contradicts the server's own signature.
+interface StdlibSymbol {
+  signature?: string
+  description: string
+  example?: string
+  since?: string | null
+  docUrl?: string
+}
+interface StdlibLibrary {
+  docUrl?: string
+  since?: string | null
+  symbols: Record<string, StdlibSymbol>
+}
+type StdlibFile = Record<string, StdlibLibrary>
+
+const STDLIB_FILES: Partial<Record<LspLang, StdlibFile>> = {
+  python: pythonStdlib as StdlibFile,
+  cpp: cppStdlib as StdlibFile
+}
+
+const stdlibIndexCache = new Map<LspLang, Map<string, { entry: StdlibSymbol; libSince: string | null }>>()
+function stdlibIndex(lang: LspLang): Map<string, { entry: StdlibSymbol; libSince: string | null }> {
+  const cached = stdlibIndexCache.get(lang)
+  if (cached) return cached
+  const idx = new Map<string, { entry: StdlibSymbol; libSince: string | null }>()
+  const file = STDLIB_FILES[lang]
+  if (file) {
+    for (const lib of Object.values(file)) {
+      for (const [name, entry] of Object.entries(lib.symbols)) idx.set(name, { entry, libSince: lib.since ?? null })
+    }
+  }
+  stdlibIndexCache.set(lang, idx)
+  return idx
+}
+
+/**
+ * Auto-add call parens to a bare function/method completion, cursor landing
+ * inside them, the way VS Code/Pylance/CLion all do. Bare pyright does NOT do
+ * this itself (`completeFunctionParens` is a Pylance-only setting, confirmed
+ * absent from pyright's own source - see LANG_SETTINGS's comment in
+ * lspService.ts), so without this "print" only ever completed to "print", not
+ * "print()". Deliberately narrow: only when the server's own insertText is
+ * still the bare label (no "(" already in it - respect a real arg-snippet
+ * from clangd/rust-analyzer rather than double up on it), and only for
+ * Function/Method - Class/Constructor is left alone, since completing a class
+ * name is just as often a type annotation as it is a call.
+ */
+function withCallParens(
+  m: Mon,
+  kind: monaco.languages.CompletionItemKind,
+  insertText: string,
+  alreadySnippet: boolean
+): { insertText: string; asSnippet: boolean } {
+  const K = m.languages.CompletionItemKind
+  const isCallable = kind === K.Function || kind === K.Method
+  if (isCallable && !alreadySnippet && !insertText.includes('(')) {
+    return { insertText: `${insertText}($0)`, asSnippet: true }
+  }
+  return { insertText, asSnippet: alreadySnippet }
+}
+
+// ---- supplemental template snippets ------------------------------------
+// A language server proposes symbols that already exist; it has no opinion on
+// boilerplate you're about to write (a class skeleton, a for loop). These are
+// editor-level snippets in the same VS Code sense, keyed by construct name so
+// typing "cla" prefix-matches "class" the same way it matches any other
+// completion label.
+interface StdlibSnippet {
+  label: string
+  description: string
+  insertText: string
+}
+const SNIPPET_FILES: Partial<Record<LspLang, Record<string, StdlibSnippet>>> = {
+  python: pythonSnippets as Record<string, StdlibSnippet>,
+  cpp: cppSnippets as Record<string, StdlibSnippet>
+}
+
+function snippetSuggestions(m: Mon, lang: LspLang, range: monaco.IRange): monaco.languages.CompletionItem[] {
+  const snippets = SNIPPET_FILES[lang]
+  if (!snippets) return []
+  return Object.values(snippets).map((s) => ({
+    label: s.label,
+    kind: m.languages.CompletionItemKind.Snippet,
+    insertText: s.insertText,
+    insertTextRules: m.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+    detail: 'Snippet',
+    documentation: { value: s.description },
+    sortText: `zzz_${s.label}`, // real symbols first; a snippet is a fallback, not competing with a real completion
+    range
+  }))
+}
+
+/**
+ * Prepend the dictionary's description/example/link ahead of whatever
+ * documentation the server already produced (kept below a divider, not
+ * discarded - the server's signature is authoritative for the exact
+ * overload/types actually in scope, the dictionary is not).
+ */
+function enrichDocumentation(lang: LspLang, label: string, lspDoc: string): string {
+  const found = stdlibIndex(lang).get(label)
+  if (!found) return lspDoc
+  const since = found.entry.since ?? found.libSince
+  const sinceNote = lang === 'cpp' && since ? `_Since ${since}._\n\n` : ''
+  const exampleBlock = found.entry.example
+    ? `\n\n**Example**\n\`\`\`${lang === 'cpp' ? 'cpp' : lang}\n${found.entry.example}\n\`\`\``
+    : ''
+  const linkBlock = found.entry.docUrl ? `\n\n[Documentation](${found.entry.docUrl})` : ''
+  const lspBlock = lspDoc.trim() ? `\n\n---\n${lspDoc}` : ''
+  return `${sinceNote}${found.entry.description}${exampleBlock}${linkBlock}${lspBlock}`
+}
+
 /** Send any debounced edit for a doc immediately, so a following request sees
  * the current buffer rather than the version clangd last heard about. */
 function flushChange(doc: Doc): void {
@@ -183,13 +303,19 @@ function registerProviders(m: Mon): void {
         }
         return {
           suggestions: items.slice(0, 200).map((it) => {
+            const rawDoc = it.documentation ? contentsToMarkdown(it.documentation as LspContents) : ''
+            const enriched = enrichDocumentation(lang, it.label, rawDoc)
+            const kind = completionKind(m, it.kind)
+            const baseInsert = it.insertText ?? it.textEdit?.newText ?? it.label
+            const wasSnippet = it.insertTextFormat === 2
+            const { insertText, asSnippet } = withCallParens(m, kind, baseInsert, wasSnippet)
             const suggestion: monaco.languages.CompletionItem = {
               label: it.label,
-              kind: completionKind(m, it.kind),
-              insertText: it.insertText ?? it.textEdit?.newText ?? it.label,
-              insertTextRules: it.insertTextFormat === 2 ? m.languages.CompletionItemInsertTextRule.InsertAsSnippet : undefined,
+              kind,
+              insertText,
+              insertTextRules: asSnippet ? m.languages.CompletionItemInsertTextRule.InsertAsSnippet : undefined,
               detail: friendlyDetail(m, it, lang),
-              documentation: it.documentation ? { value: contentsToMarkdown(it.documentation as LspContents) } : undefined,
+              documentation: enriched.trim() ? { value: enriched } : undefined,
               sortText: it.sortText,
               filterText: it.filterText,
               range
@@ -199,20 +325,25 @@ function registerProviders(m: Mon): void {
             // follow-up request needs to ask for THIS one.
             completionOrigin.set(suggestion, { doc, raw: it })
             return suggestion
-          })
+          }).concat(snippetSuggestions(m, lang, range))
         }
       },
       async resolveCompletionItem(item, token) {
         const origin = completionOrigin.get(item)
         if (!origin) return item
         const resolved = await lspRequest<LspCompletion>(origin.doc, 'completionItem/resolve', origin.raw as object)
-        if (token.isCancellationRequested || !resolved) return item
+        if (token.isCancellationRequested) return item
         // A resolved item can bring a real detail/documentation the initial
         // list omitted, or confirm there simply isn't one - either way, don't
         // downgrade what provideCompletionItems already had (friendlyDetail's
-        // "Variable in this file" is worth more than resolve's silence).
-        if (resolved.documentation) item.documentation = { value: contentsToMarkdown(resolved.documentation as LspContents) }
-        if (resolved.detail) item.detail = friendlyDetail(m, { ...origin.raw, detail: resolved.detail }, lang)
+        // "Variable in this file" is worth more than resolve's silence). The
+        // dictionary lookup runs regardless of what resolve returned, so a
+        // symbol with a real signature but zero prose (typeshed stubs are full
+        // of these) still gets a description if one exists.
+        const rawDoc = resolved?.documentation ? contentsToMarkdown(resolved.documentation as LspContents) : ''
+        const enriched = enrichDocumentation(lang, origin.raw.label, rawDoc)
+        if (enriched.trim()) item.documentation = { value: enriched }
+        if (resolved?.detail) item.detail = friendlyDetail(m, { ...origin.raw, detail: resolved.detail }, lang)
         return item
       }
     })
@@ -226,7 +357,11 @@ function registerProviders(m: Mon): void {
           position: toLspPos(position)
         })
         if (token.isCancellationRequested || !res?.contents) return null
-        const value = contentsToMarkdown(res.contents)
+        const raw = contentsToMarkdown(res.contents)
+        // Hover has no item label the way completion does; the identifier
+        // under the cursor is the equivalent lookup key.
+        const word = model.getWordAtPosition(position)?.word
+        const value = word ? enrichDocumentation(lang, word, raw) : raw
         if (!value.trim()) return null
         return { contents: [{ value }], range: res.range ? toMonacoRange(res.range) : undefined }
       }

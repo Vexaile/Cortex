@@ -1,0 +1,42 @@
+{
+  "class": {
+    "label": "class",
+    "description": "Class skeleton: a public section (constructor first) and a private section for members.",
+    "insertText": "class ${1:ClassName} {\npublic:\n\t${1:ClassName}() {}\n\n\t$0\n\nprivate:\n};"
+  },
+  "struct": {
+    "label": "struct",
+    "description": "Struct skeleton (all-public aggregate, no constructor implied).",
+    "insertText": "struct ${1:Name} {\n\t$0\n};"
+  },
+  "enum": {
+    "label": "enum class",
+    "description": "Scoped enum (C++11+) - enumerators don't leak into the surrounding scope the way a plain `enum`'s do, and won't implicitly convert to int.",
+    "insertText": "enum class ${1:Name} {\n\t$0\n};"
+  },
+  "main": {
+    "label": "main",
+    "description": "Program entry point returning an exit status.",
+    "insertText": "int main() {\n\t$0\n\treturn 0;\n}"
+  },
+  "for": {
+    "label": "for",
+    "description": "Indexed for loop.",
+    "insertText": "for (${1:int i = 0}; ${2:i < n}; ${3:++i}) {\n\t$0\n}"
+  },
+  "forr": {
+    "label": "for (range-based)",
+    "description": "Range-based for loop (C++11+) over a container.",
+    "insertText": "for (${1:auto}& ${2:item} : ${3:container}) {\n\t$0\n}"
+  },
+  "while": {
+    "label": "while",
+    "description": "While loop.",
+    "insertText": "while (${1:condition}) {\n\t$0\n}"
+  },
+  "try": {
+    "label": "try/catch",
+    "description": "Exception handling block.",
+    "insertText": "try {\n\t$0\n} catch (const std::exception& e) {\n\t\n}"
+  }
+}

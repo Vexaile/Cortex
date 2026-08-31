@@ -102,8 +102,27 @@ the compiler/server recognizes is worse than no entry.
 
 ## Status
 
-Not yet implemented. This file is the plan; `src/shared/stdlib/` doesn't exist yet,
-and `lspClient.ts`'s completion mapping doesn't consult it. The next step is a small
-loader plus the merge logic in `friendlyDetail`/the completion mapping, seeded with
-one library end to end (`<vector>` is a reasonable first target) before scaling the
-agent loop up to the rest of the coverage list above.
+The loader and merge logic are live in `lspClient.ts` (`enrichDocumentation`,
+`stdlibIndex`), consulted from both `provideCompletionItems` and
+`resolveCompletionItem`, and from the hover provider via the identifier under
+the cursor. Seeded so far:
+
+- `src/shared/stdlib/python.json`: `time` (full module), `os` (a few common
+  entries), `random`
+- `src/shared/stdlib/cpp.json`: `<vector>`, `<chrono>`
+
+Verified live against a real pyright process (not just typechecked): a
+symbol with no docstring at all in typeshed, like `time.asctime`, now shows
+the curated description + example + doc link ahead of the real signature
+pyright provides.
+
+Also implemented alongside this, same file: `src/shared/stdlib/*-snippets.json`
+(construct templates - `class`, `for`, `if __name__`, etc. - matched by
+prefix the same way any other completion label is) and client-side
+call-parens insertion (`withCallParens` in lspClient.ts) so a bare function
+completion like `print` inserts `print()` with the cursor between the
+parens, regardless of whether the server itself supports that.
+
+Not yet built: the actual recurring agent that expands the dictionary
+automatically. The format, loader, and merge path are proven; what's left is
+scheduling the agent described above to keep growing the JSON files.

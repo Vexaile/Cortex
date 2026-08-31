@@ -112,7 +112,12 @@ function deriveToolchain(compiler: string): Promise<Toolchain> {
 }
 
 export function buildClangdConfig(tc: Toolchain, cppStd: string, cStd = 'c17'): string {
-  const global: string[] = []
+  // -Wunused-variable/-Wunused-function (an unused local, a defined-but-never-
+  // called function, an unused enum member) are gated behind -Wall in
+  // clang/gcc; without it clangd's diagnostics stay quiet about dead code even
+  // though the compile itself would warn. This is the same baseline VS
+  // Code's C/C++ extension and CLion both ship with by default.
+  const global: string[] = ['-Wall', '-Wextra']
   if (tc.target) global.push(`--target=${tc.target}`)
   for (const dir of tc.includes) {
     // Two argv tokens: clang takes the path as the argument after -isystem.
