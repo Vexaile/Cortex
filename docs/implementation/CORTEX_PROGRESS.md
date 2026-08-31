@@ -3,6 +3,67 @@
 Newest first. One entry per completed slice: what shipped, how it was verified,
 and what it unblocks. See `CORTEX_IMPLEMENTATION_PLAN.md` for the full plan.
 
+## AI engineering agent: the first real tool-loop step (Phase 3 keystone)
+
+The AI panel was a single-shot chat: it answered questions but could not act.
+This turns it into a task-oriented agent. The user chose the engine (a
+provider-native tool loop with a structured fallback) and the approval
+granularity (per-file approve/reject) via AskUserQuestion.
+
+The agent runs a real tool-calling loop in the main process (Anthropic tool use
+and the OpenAI tool-calls format; Gemini and unconfigured providers fall back to
+a single structured-proposal request). Its scoped tools follow CLAUDE.md's trust
+tiers: read_file, search_project, get_diagnostics, and get_project_model are SAFE
+and auto-run behind the workspace boundary; propose_edit is REVIEW-REQUIRED and
+NEVER writes to disk. It stages a whole-file replacement that the panel renders
+as a unified diff; only when the engineer approves it per file does the renderer
+apply it, through the same workspace-confined write path a user edit uses
+(window.api.writeFile + applyExternalEdit to sync an open tab, undoable via
+Monaco's controlled value). Every tool call is surfaced in the transcript, so a
+run is auditable.
+
+Security: tool paths resolve against the trusted main-process workspace root
+(never a renderer-supplied path) and are confined with fsService.withinWorkspace;
+no model output ever reaches a shell; the API key stays in main; the loop caps
+at MAX_AGENT_STEPS; cancel stops it between steps; a workspace switch cancels the
+run and clears the transcript, staged edits, and conversation (dropped by run id
+if any events arrive late).
+
+Pure logic is unit-tested and shared: agentTools.ts (tool schema, provider
+adapters, the fallback JSON parser that tolerates fences/prose and ignores braces
+in strings) and diff.ts (LCS line diff + collapsing hunks + a too-large guard).
+The renderer view (AgentView + DiffView) lives beside the existing chat behind an
+Agent/Chat toggle.
+
+Verified live end-to-end via CDP against a mock OpenAI-compatible server (so no
+real provider was needed and the user's settings were preserved, key untouched):
+the loop ran read_file then propose_edit, staged exactly one PENDING edit with
+nothing written to disk, and only after approve did the file on disk change to
+the proposed content; the transcript rendered the tool chips and a themed unified
+diff with Approve/Reject. Unit tests for agentTools and diff; workspaceReset guard
+extended to the agent state.
+
+A 3-dimension adversarial review (17 agents) ran on the diff; all eleven
+confirmed findings were fixed. The critical one: approve blindly wrote the
+propose-time snapshot, silently discarding unsaved editor edits or a change made
+since the proposal, now approve first re-reads the file and refuses (marking the
+edit "stale") if the on-disk content changed or the tab is dirty, rather than
+clobbering (verified live: an out-of-band change is kept and the agent edit is
+refused). The majors: string-only workspace confinement let a symlink escape via
+the un-gated read_file, now the path is verified with realpath (physical
+confinement) before any read or staged write; a CRLF file diffed as fully changed
+and was rewritten to LF on approve, now the diff is line-ending tolerant and the
+write preserves the file's existing EOL (verified live: a CRLF file stays CRLF);
+plain cancel left the in-flight run streaming into the transcript, now it clears
+the run id (and the loops check cancellation after each request) so late events
+are dropped; the large-file path told the user to approve before reviewing, now
+it warns, and a rewrite that drops most of a file shows a truncation warning; and
+the O(n*m) line diff, recomputed twice per render on every streamed event, is now
+memoized and single-pass. The minors (tool-chip ok flag, fallback conversation
+history, a refreshTree failure mislabeling an applied edit, double-click writing
+twice, and a trailing-newline-only change) were all fixed too. Re-verified: full
+suite green, targeted diff/agentTools tests extended.
+
 ## Integrated terminal: a real pty-backed shell (Phase 1)
 
 The audit's most-cited P0 (nine users, "back to VS Code within the hour"):

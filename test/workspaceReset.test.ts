@@ -83,7 +83,12 @@ const WORKSPACE_SCOPED = [
   'serialLines',
   'serialCarry',
   'serialError',
-  'plotSeries'
+  'plotSeries',
+  // The agent transcript, staged edits, and conversation reference the old
+  // project's files, so a switch must clear them.
+  'agentLog',
+  'agentEdits',
+  'agentMessages'
 ]
 
 describe('workspaceScopedReset', () => {

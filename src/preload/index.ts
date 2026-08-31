@@ -32,7 +32,9 @@ import type {
   TerminalCreateRequest,
   TerminalCreateResult,
   TerminalDataChunk,
-  TerminalExit
+  TerminalExit,
+  AgentRunRequest,
+  AgentEvent
 } from '../shared/ipc'
 import type { LspCall, LspAvailability, LspDiagnosticsPush, LspServerExit, LspBusy } from '../shared/lsp'
 
@@ -163,6 +165,11 @@ const api = {
   }): Promise<void> => ipcRenderer.invoke(IPC.AI_COMPLETE, req),
   onAiStream: (cb: (s: { id: string; delta: string; done: boolean; error?: string }) => void): Unsub =>
     on(IPC.AI_STREAM, cb),
+
+  // ai engineering agent (tool loop)
+  agentRun: (req: AgentRunRequest): Promise<void> => ipcRenderer.invoke(IPC.AGENT_RUN, req),
+  agentCancel: (id: string): void => ipcRenderer.send(IPC.AGENT_CANCEL, id),
+  onAgentEvent: (cb: (e: AgentEvent) => void): Unsub => on(IPC.AGENT_EVENT, cb),
 
   // settings / app
   getSettings: (): Promise<unknown> => ipcRenderer.invoke(IPC.SETTINGS_GET),

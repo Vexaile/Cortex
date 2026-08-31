@@ -89,6 +89,7 @@ export default function App(): JSX.Element {
         if (s.delta) appendAiDelta(s.delta)
         if (s.done) finishAi(s.error)
       }),
+      window.api.onAgentEvent((e) => useStore.getState().handleAgentEvent(e)),
       window.api.onFsEvent(() => {
         void refreshTree()
       })

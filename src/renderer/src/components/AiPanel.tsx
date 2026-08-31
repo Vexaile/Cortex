@@ -3,6 +3,7 @@ import { Sparkles, Send, X, ScanSearch, Zap, Cpu, Settings2 } from 'lucide-react
 import { useStore } from '../store/useStore'
 import { buildHardwareGraph } from '@shared/hardwareGraph'
 import PanelHeader from './PanelHeader'
+import AgentView from './AgentView'
 
 const QUICK_ACTIONS = [
   { icon: ScanSearch, label: 'Analyze firmware', prompt: 'Analyze this firmware for stack overflow risk, race conditions, long ISRs, heap fragmentation, DMA misuse, and missing volatile qualifiers. List concrete findings.' },
@@ -11,7 +12,7 @@ const QUICK_ACTIONS = [
 ]
 
 export default function AiPanel(): JSX.Element {
-  const { chat, aiStreaming, sendChat, toggleAi, tabs, activePath, aiWidth, settings, setSidebar, projectModel } =
+  const { chat, aiStreaming, sendChat, toggleAi, tabs, activePath, aiWidth, settings, setSidebar, projectModel, agentMode, setAgentMode } =
     useStore()
   // "Configured" means it can actually answer: a provider, plus a key unless the
   // provider is a local endpoint (which needs none).
@@ -92,14 +93,37 @@ export default function AiPanel(): JSX.Element {
       <PanelHeader
         icon={<Sparkles size={14} className="text-ide-accent" />}
         actions={
-          <button className="rounded p-1 hover:bg-ide-hover hover:text-ide-text" onClick={toggleAi} title="Close">
-            <X size={14} />
-          </button>
+          <div className="row gap-1.5">
+            {/* Agent (task-oriented, tool loop) vs plain Chat (single answer). */}
+            <div className="row overflow-hidden rounded border border-ide-border text-[10px] font-medium">
+              {(['agent', 'chat'] as const).map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setAgentMode(m === 'agent')}
+                  className={`px-1.5 py-0.5 ${
+                    (m === 'agent') === agentMode
+                      ? 'bg-ide-active text-ide-text'
+                      : 'text-ide-muted hover:bg-ide-hover hover:text-ide-text'
+                  }`}
+                  title={m === 'agent' ? 'Task agent: reads the project and proposes edits' : 'Ask a question'}
+                >
+                  {m === 'agent' ? 'Agent' : 'Chat'}
+                </button>
+              ))}
+            </div>
+            <button className="rounded p-1 hover:bg-ide-hover hover:text-ide-text" onClick={toggleAi} title="Close">
+              <X size={14} />
+            </button>
+          </div>
         }
       >
         AI Assistant
       </PanelHeader>
 
+      {agentMode ? (
+        <AgentView />
+      ) : (
+        <>
       <div className="min-h-0 flex-1 space-y-3 overflow-auto p-3">
         {chat.length === 0 && !configured ? (
           // Do not advertise an assistant that cannot answer. Say it plainly and
@@ -179,6 +203,8 @@ export default function AiPanel(): JSX.Element {
           </button>
         </div>
       </div>
+        </>
+      )}
     </div>
   )
 }

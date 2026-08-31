@@ -110,6 +110,13 @@ export const IPC = {
   AI_COMPLETE: 'ai:complete',
   AI_STREAM: 'ai:stream', // main -> renderer
 
+  // AI engineering agent (tool loop). Read-only tools auto-run behind the
+  // workspace boundary; file edits are staged as reviewable diffs and never
+  // written by the agent, only by the renderer after the human approves.
+  AGENT_RUN: 'agent:run', // renderer -> main (invoke): start a task
+  AGENT_CANCEL: 'agent:cancel', // renderer -> main: stop the running task
+  AGENT_EVENT: 'agent:event', // main -> renderer: streamed steps/edits/result
+
   // App
   APP_INFO: 'app:info',
   SETTINGS_GET: 'settings:get',
@@ -519,6 +526,44 @@ export interface SerialOpenOptions {
   stopBits?: 1 | 1.5 | 2
   parity?: 'none' | 'even' | 'odd' | 'mark' | 'space'
 }
+
+// ---- AI engineering agent -------------------------------------------------
+
+export interface AgentChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+/** A run request. The renderer passes the snapshot the agent's read-only tools
+ *  need but the main process cannot cheaply re-derive (the live Problems feed);
+ *  file reads/search/project-model are served by main directly from disk. */
+export interface AgentRunRequest {
+  id: string
+  messages: AgentChatMessage[]
+  workspaceRoot: string
+  activePath?: string
+  diagnostics: Diagnostic[]
+}
+
+/** A staged, not-yet-applied whole-file replacement for human review. */
+export interface AgentStagedEdit {
+  path: string
+  oldContent: string
+  newContent: string
+  summary?: string
+  /** Set when the file could not be read or the path was refused; the UI shows
+   *  the reason instead of a diff, and the edit cannot be applied. */
+  error?: string
+}
+
+/** Streamed agent progress. Every tool call is surfaced so the run is auditable. */
+export type AgentEvent =
+  | { id: string; kind: 'status'; text: string }
+  | { id: string; kind: 'tool'; tool: string; input: string; ok: boolean; result: string }
+  | { id: string; kind: 'text'; delta: string }
+  | { id: string; kind: 'edit'; edit: AgentStagedEdit }
+  | { id: string; kind: 'done' }
+  | { id: string; kind: 'error'; error: string }
 
 export interface AppInfo {
   version: string

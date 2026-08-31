@@ -15,9 +15,11 @@ import type {
   BoardPort,
   BoardTarget,
   SimEvent,
-  SimExit
+  SimExit,
+  AgentEvent
 } from '@shared/ipc'
 import { langFromPath, isHeaderPath, cDriver, cppDriver, type LanguageDef } from '@shared/languages'
+import { normalizeEol, detectEol, withEol } from '@shared/diff'
 import type { LspAvailability } from '@shared/lsp'
 import type { DebugState, DebugOutput } from '@shared/ipc'
 
@@ -173,6 +175,15 @@ export function workspaceScopedReset(): Record<string, unknown> {
     diagnostics: [],
     // board target is per project (.cortex/config.json)
     selectedFqbn: '',
+    // The agent transcript, staged edits, and conversation all reference the old
+    // project's files, so a switch must not carry them (and any in-flight run's
+    // events are dropped once agentRunId is cleared).
+    agentRunning: false,
+    agentRunId: null,
+    agentStatus: '',
+    agentLog: [],
+    agentEdits: [],
+    agentMessages: [],
     // Derived from the OLD workspace's files; refreshProjectModel rebuilds it
     // for the new one from openWorkspace, but a switch that never gets there
     // (an early return, a thrown readDir) should not leave the previous
@@ -258,6 +269,28 @@ export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
 }
+
+// ---- AI engineering agent (renderer view of a tool-loop run) --------------
+
+/** One staged, not-yet-applied edit plus its review state. */
+export interface AgentEdit {
+  id: string
+  path: string
+  oldContent: string
+  newContent: string
+  summary?: string
+  error?: string
+  status: 'pending' | 'applying' | 'approved' | 'rejected' | 'failed' | 'stale'
+}
+
+/** An ordered transcript entry the agent panel renders. Tool calls are shown so
+ *  the run is auditable; edits reference an entry in `agentEdits`. */
+export type AgentEntry =
+  | { type: 'user'; text: string }
+  | { type: 'assistant'; text: string }
+  | { type: 'tool'; tool: string; input: string; ok: boolean; result: string }
+  | { type: 'edit'; editId: string }
+  | { type: 'error'; text: string }
 
 export interface AppSettings {
   theme: 'dark' | 'light'
@@ -422,6 +455,15 @@ interface State {
   chat: ChatMessage[]
   aiStreaming: boolean
 
+  // ai engineering agent
+  agentMode: boolean // panel shows the agent (task) view vs plain chat
+  agentRunning: boolean
+  agentRunId: string | null
+  agentStatus: string // transient "Thinking..." line while running
+  agentLog: AgentEntry[]
+  agentEdits: AgentEdit[]
+  agentMessages: ChatMessage[] // the conversation sent to the model
+
   // settings
   settings: AppSettings | null
 
@@ -565,6 +607,14 @@ interface State {
   sendChat: (text: string, context?: string) => Promise<void>
   appendAiDelta: (delta: string) => void
   finishAi: (error?: string) => void
+
+  setAgentMode: (on: boolean) => void
+  runAgent: (text: string) => Promise<void>
+  cancelAgent: () => void
+  clearAgent: () => void
+  handleAgentEvent: (e: AgentEvent) => void
+  approveAgentEdit: (id: string) => Promise<void>
+  rejectAgentEdit: (id: string) => void
 
   loadSettings: () => Promise<void>
   updateSettings: (patch: Partial<AppSettings>) => Promise<void>
@@ -721,6 +771,14 @@ export const useStore = create<State>((set, get) => ({
   chat: [],
   aiStreaming: false,
 
+  agentMode: lsBool('cortex.agentMode', true),
+  agentRunning: false,
+  agentRunId: null,
+  agentStatus: '',
+  agentLog: [],
+  agentEdits: [],
+  agentMessages: [],
+
   settings: null,
 
   async openWorkspace(path) {
@@ -733,6 +791,7 @@ export const useStore = create<State>((set, get) => ({
     // A debug session holds a gdb process and the old project's executable, and
     // nothing else stops it: the state reset alone would leave that gdb running.
     get().stopDebug()
+    get().cancelAgent() // stop an in-flight agent task bound to the old project
     await window.api.watchStop()
     const tree = await window.api.readDir(path)
     set({
@@ -782,6 +841,7 @@ export const useStore = create<State>((set, get) => ({
     await get().stopRun()
     await get().stopSim()
     get().stopDebug()
+    get().cancelAgent()
     await window.api.watchStop()
     const root = get().workspaceRoot
     if (root) void window.api.lspDisposeRoot(root)
@@ -1558,6 +1618,148 @@ export const useStore = create<State>((set, get) => ({
       set({ chat })
     }
     set({ aiStreaming: false })
+  },
+
+  setAgentMode(on) {
+    set({ agentMode: on })
+    lsSetBool('cortex.agentMode', on)
+  },
+
+  async runAgent(text) {
+    if (!text.trim() || get().agentRunning) return
+    const root = get().workspaceRoot
+    if (!root) return
+    const messages = [...get().agentMessages, { role: 'user' as const, content: text }]
+    const id = `agent-${performance.now()}`
+    set({
+      agentRunning: true,
+      agentRunId: id,
+      agentMessages: messages,
+      aiVisible: true,
+      agentStatus: 'Thinking...',
+      agentLog: [...get().agentLog, { type: 'user', text }]
+    })
+    try {
+      await window.api.agentRun({
+        id,
+        messages,
+        workspaceRoot: root,
+        activePath: get().activePath ?? undefined,
+        diagnostics: get().diagnostics
+      })
+    } catch (e) {
+      get().handleAgentEvent({ id, kind: 'error', error: e instanceof Error ? e.message : String(e) })
+    }
+  },
+
+  cancelAgent() {
+    const id = get().agentRunId
+    if (id) window.api.agentCancel(id)
+    // Clear the run id too, so late events from the in-flight request (which the
+    // main process cannot interrupt) are dropped by handleAgentEvent's id gate
+    // rather than streaming text, tool chips, or an approvable edit into a run
+    // the user stopped.
+    set({ agentRunning: false, agentStatus: '', agentRunId: null })
+  },
+
+  clearAgent() {
+    if (get().agentRunning) return
+    set({ agentLog: [], agentEdits: [], agentMessages: [], agentStatus: '' })
+  },
+
+  handleAgentEvent(e) {
+    // Drop events from a superseded run (a workspace switch clears agentRunId).
+    if (e.id !== get().agentRunId) return
+    if (e.kind === 'status') {
+      set({ agentStatus: e.text })
+    } else if (e.kind === 'text') {
+      const log = [...get().agentLog]
+      const last = log[log.length - 1]
+      // Coalesce consecutive text into one assistant bubble; a tool call between
+      // two text blocks starts a fresh bubble.
+      if (last && last.type === 'assistant') log[log.length - 1] = { type: 'assistant', text: last.text + e.delta }
+      else log.push({ type: 'assistant', text: e.delta })
+      set({ agentLog: log })
+    } else if (e.kind === 'tool') {
+      set({ agentLog: [...get().agentLog, { type: 'tool', tool: e.tool, input: e.input, ok: e.ok, result: e.result }] })
+    } else if (e.kind === 'edit') {
+      const editId = `edit-${get().agentEdits.length}-${Math.round(performance.now())}`
+      const edit: AgentEdit = { id: editId, ...e.edit, status: e.edit.error ? 'failed' : 'pending' }
+      set({ agentEdits: [...get().agentEdits, edit], agentLog: [...get().agentLog, { type: 'edit', editId }] })
+    } else if (e.kind === 'error') {
+      set({ agentLog: [...get().agentLog, { type: 'error', text: e.error }], agentRunning: false, agentStatus: '' })
+    } else if (e.kind === 'done') {
+      // Fold THIS run's assistant text (after the last user entry) into the
+      // conversation so a follow-up task has context.
+      const log = get().agentLog
+      let from = 0
+      for (let i = log.length - 1; i >= 0; i--) if (log[i].type === 'user') { from = i; break }
+      const answer = log
+        .slice(from)
+        .filter((x): x is Extract<AgentEntry, { type: 'assistant' }> => x.type === 'assistant')
+        .map((x) => x.text)
+        .join('\n')
+      const messages = answer.trim()
+        ? [...get().agentMessages, { role: 'assistant' as const, content: answer }]
+        : get().agentMessages
+      set({ agentRunning: false, agentStatus: '', agentMessages: messages })
+    }
+  },
+
+  async approveAgentEdit(id) {
+    const edit = get().agentEdits.find((e) => e.id === id)
+    if (!edit || edit.status !== 'pending') return
+    const setStatus = (patch: Partial<AgentEdit>): void =>
+      set({ agentEdits: get().agentEdits.map((e) => (e.id === id ? { ...e, ...patch } : e)) })
+
+    // Reconcile against reality before clobbering: the file may have changed
+    // since the agent proposed this (a prior approved edit, an external tool, or
+    // unsaved edits in its open tab). The reviewed diff was oldContent ->
+    // newContent, so applying blindly would silently discard those changes.
+    const tab = get().tabs.find((t) => normPath(t.path) === normPath(edit.path))
+    if (tab && tab.content !== tab.savedContent) {
+      setStatus({ status: 'stale', error: `${tab.name} has unsaved edits. Save or reject, then re-run the agent.` })
+      return
+    }
+    let current = ''
+    try {
+      const r = await window.api.readFile(edit.path)
+      if (r.kind !== 'text' && (await window.api.exists(edit.path))) {
+        setStatus({ status: 'stale', error: 'The file is no longer a text file.' })
+        return
+      }
+      current = r.kind === 'text' ? r.content : ''
+    } catch {
+      current = '' // gone since propose: treated as a new file below
+    }
+    if (normalizeEol(current) !== normalizeEol(edit.oldContent)) {
+      setStatus({ status: 'stale', error: 'The file changed since this was proposed. Re-run the agent to see a fresh diff.' })
+      return
+    }
+
+    // Flip status BEFORE the await so a fast second click cannot write twice.
+    setStatus({ status: 'applying' })
+    try {
+      // Preserve the file's existing line endings so approving does not silently
+      // rewrite a CRLF file to LF. writeFile is workspace-confined in main, so
+      // the edit passes the same boundary a user edit does; an open tab is
+      // synced (undoable via Monaco's controlled value).
+      const toWrite = withEol(edit.newContent, detectEol(edit.oldContent || current))
+      await window.api.writeFile(edit.path, toWrite)
+      if (tab) get().applyExternalEdit(edit.path, toWrite)
+      setStatus({ status: 'approved' })
+      // Surface a newly created file; a refresh failure must NOT flip an
+      // already-applied edit to failed.
+      void get().refreshTree()
+    } catch (err) {
+      setStatus({ status: 'failed', error: err instanceof Error ? err.message : String(err) })
+    }
+  },
+
+  rejectAgentEdit(id) {
+    set({
+      agentEdits: get().agentEdits.map((e) => (e.id === id && e.status === 'pending' ? { ...e, status: 'rejected' } : e))
+    })
   },
 
   async loadSettings() {

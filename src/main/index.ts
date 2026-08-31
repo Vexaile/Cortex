@@ -30,8 +30,9 @@ import * as debug from './services/debugService'
 import * as sim from './services/simService'
 import * as lsp from './services/lspService'
 import * as terminal from './services/terminalService'
+import * as agent from './services/agentService'
 import type { LspCall } from '../shared/lsp'
-import type { TerminalCreateRequest } from '../shared/ipc'
+import type { TerminalCreateRequest, AgentRunRequest } from '../shared/ipc'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -615,6 +616,12 @@ function registerIpc(): void {
 
   // ---- ai ----
   ipcMain.handle(IPC.AI_COMPLETE, (_e, req: AiRequest) => ai.complete(requireWindow(), req))
+
+  // ---- ai engineering agent (tool loop) ----
+  // Read-only tools run behind the workspace boundary; file edits are staged as
+  // reviewable diffs and applied only by the renderer after human approval.
+  ipcMain.handle(IPC.AGENT_RUN, (_e, req: AgentRunRequest) => agent.run(requireWindow(), req))
+  ipcMain.on(IPC.AGENT_CANCEL, (_e, id: string) => agent.cancel(id))
 
   // ---- project config ----
   ipcMain.handle(IPC.PROJECT_CONFIG_GET, (_e, root: string) => projectConfig.getProjectConfig(root))
