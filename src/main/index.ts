@@ -29,7 +29,9 @@ import * as pkg from './services/packageService'
 import * as debug from './services/debugService'
 import * as sim from './services/simService'
 import * as lsp from './services/lspService'
+import * as terminal from './services/terminalService'
 import type { LspCall } from '../shared/lsp'
+import type { TerminalCreateRequest } from '../shared/ipc'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -100,6 +102,14 @@ function createWindow(): void {
     void shell.openExternal(details.url)
     return { action: 'deny' }
   })
+
+  // A renderer reload or crash-restart wipes the terminal controller but leaves
+  // its pty sessions alive in this process (a reload never runs killAll), so
+  // they would accumulate until they hit the per-session cap. Reap them when the
+  // renderer starts a fresh top-level load. On the very first load there are no
+  // sessions, so this is a no-op there; a dev HMR patch does not reload, so a
+  // live shell survives HMR as before.
+  mainWindow.webContents.on('did-start-loading', () => terminal.killAll())
 
   // electron-vite injects ELECTRON_RENDERER_URL in dev.
   const devUrl = process.env['ELECTRON_RENDERER_URL']
@@ -568,6 +578,20 @@ function registerIpc(): void {
   ipcMain.handle(IPC.RUN_STOP, (_e, id: string) => runner.stopRun(id))
   ipcMain.handle(IPC.RUN_INPUT, (_e, id: string, data: string) => runner.sendInput(id, data))
 
+  // ---- integrated terminal (pty) ----
+  // A user-driven terminal is user-authorized: it spawns the user's own shell
+  // at the user's own privileges, with the open workspace as cwd (chosen here,
+  // not supplied by the renderer). Input is the user typing; no string is ever
+  // interpolated into a shell command by Cortex.
+  ipcMain.handle(IPC.TERMINAL_CREATE, (_e, req: TerminalCreateRequest) =>
+    terminal.create(requireWindow(), req)
+  )
+  ipcMain.on(IPC.TERMINAL_INPUT, (_e, id: string, data: string) => terminal.write(id, data))
+  ipcMain.on(IPC.TERMINAL_RESIZE, (_e, id: string, cols: number, rows: number) =>
+    terminal.resize(id, cols, rows)
+  )
+  ipcMain.on(IPC.TERMINAL_KILL, (_e, id: string) => terminal.kill(id))
+
   // ---- serial ----
   ipcMain.handle(IPC.SERIAL_LIST, () => serial.listPorts())
   ipcMain.handle(IPC.SERIAL_OPEN, (_e, opts: SerialOpenOptions) => serial.openPort(requireWindow(), opts))
@@ -683,6 +707,7 @@ app.on('window-all-closed', () => {
   sim.killAll()
   debug.stop()
   lsp.killAll()
+  terminal.killAll()
   fsService.stopWatch()
   void serial.closePort()
   if (process.platform !== 'darwin') app.quit()
@@ -693,4 +718,5 @@ app.on('before-quit', () => {
   sim.killAll()
   debug.stop()
   lsp.killAll()
+  terminal.killAll()
 })

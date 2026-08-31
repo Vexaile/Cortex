@@ -203,12 +203,14 @@ describe('workspaceScopedReset', () => {
       expect(body).toMatch(/tree:\s*\[\]/)
     })
 
-    it('stops the project processes, watcher, and language servers', () => {
+    it('stops the project processes, watcher, language servers, and terminal', () => {
       expect(body).toContain('stopRun()')
       expect(body).toContain('stopSim()')
       expect(body).toContain('stopDebug()')
       expect(body).toContain('watchStop()')
       expect(body).toContain('lspDisposeRoot')
+      // The terminal's shell is rooted in the closing project; tear it down too.
+      expect(body).toContain('__cortexTerminal?.dispose()')
     })
 
     it('returns to the editor view so Welcome shows, and forgets the last workspace', () => {

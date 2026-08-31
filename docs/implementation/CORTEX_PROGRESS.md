@@ -3,6 +3,63 @@
 Newest first. One entry per completed slice: what shipped, how it was verified,
 and what it unblocks. See `CORTEX_IMPLEMENTATION_PLAN.md` for the full plan.
 
+## Integrated terminal: a real pty-backed shell (Phase 1)
+
+The audit's most-cited P0 (nine users, "back to VS Code within the hour"):
+Cortex had no shell, so esptool, idf.py, pip, git, and custom scripts were
+impossible in-app. Added a real pty-backed terminal (node-pty + xterm.js), the
+execution model the user chose over a command-allowlist runner. A user-typed
+terminal is user-authorized: it spawns the user's own shell (PowerShell on
+Windows, $SHELL/bash on posix) at the user's own privileges, with the open
+workspace as the cwd. The security boundary is explicit and preserved: the shell
+is spawned as file + argv (never a shell string), the cwd is chosen in the main
+process from the trusted workspace root (never a renderer-supplied path), IPC
+inputs are validated, sessions are capped, and every shell is killed on window
+close and before quit. AI-initiated commands do not flow through this terminal;
+they stay behind the allowlist / approval gate for the agent slice.
+
+Architecture: the pure shell/dimension logic is a unit-tested shared module
+(`src/shared/terminalConfig.ts`). The pty sessions live in a main-process
+service (`terminalService.ts`), loaded lazily as an optional native dependency
+so a machine without the prebuilt binary still starts (the terminal reports
+unavailable). The xterm view and its session live in a module-level controller
+(`terminalController.ts`) outside React, so a running `pio run` survives every
+way the bottom dock unmounts (tab switch, panel close, simulator switch); the
+controller re-parents a persistent wrapper into whatever host mounts. node-pty
+is a native module: `externalizeDepsPlugin` does not externalize
+optionalDependencies, so it was being bundled and its loader could not find its
+binary; the vite config now externalizes it (and serialport) explicitly.
+
+Reachable from Tools > Terminal, the command palette, and Ctrl+` (which now
+toggles the terminal, VS Code style). On a workspace switch the shell is
+disposed after the root switch commits and respawns in the new project's cwd;
+on Close Folder it is disposed with no stray shell. xterm.js is lazy-loaded so
+it stays out of the startup bundle.
+
+Verified live via CDP against a real workspace: the terminal spawns PowerShell
+in the workspace cwd; a typed `echo` round-trips renderer -> main -> pty ->
+xterm; exactly one shell survives a tab round-trip and a panel close/reopen with
+scrollback intact; switching projects respawns a fresh shell in the new cwd with
+no stale prompt; closing spawns no stray shell. Unit tests cover the pure
+config, the service security invariants, and the controller supersession logic;
+the workspaceReset guard was extended to assert terminal teardown.
+
+A 3-dimension adversarial review (12 agents) ran on the diff; all confirmed
+findings were fixed and re-verified, and four false positives were rejected
+(single-window session-id ownership, output coalescing, a create-reject stuck
+state, and electron-builder packaging). The findings: (1) a race, `start()` had
+no supersession check across its async `create()`, so a workspace switch or
+close mid-spawn could orphan a shell or double-spawn one, fixed with an epoch
+captured before the await and re-checked after (the superseded start kills its
+just-spawned pty and bails; dispose bumps the epoch); (2) the terminal entry
+points (Ctrl+`, Tools, palette) silently no-opped from the simulator view and
+with no workspace open, fixed with an `openTerminal()` action that leaves the
+simulator and requires a workspace (the menu item is disabled without one); (3)
+the Output tab wore the ">_" shell glyph while the real Terminal tab got the
+boxed one, now swapped. A related robustness gap found during verification (a
+renderer reload leaks the old ptys, since a reload never runs killAll) was also
+closed by reaping terminal sessions on the renderer's next top-level load.
+
 ## First-run compiler wall: a friendly, actionable state (Phase 2)
 
 Audit P0: New Sketch opens the Simulator, which compiles the sketch on the host,

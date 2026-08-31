@@ -1,11 +1,20 @@
-import { Terminal, Radio, AlertTriangle, X, Trash2 } from 'lucide-react'
+import { useEffect, useState, lazy, Suspense } from 'react'
+import { Terminal, Radio, AlertTriangle, ScrollText, X, Trash2 } from 'lucide-react'
 import { useStore, type BottomView } from '../store/useStore'
 import OutputConsole from './OutputConsole'
 import SerialMonitor from './SerialMonitor'
 import ProblemsPanel from './ProblemsPanel'
 
+// xterm.js is only needed once the user opens the terminal, so keep it (and the
+// controller) out of the startup bundle. window.__cortexTerminal is set when
+// this chunk loads; the clear button uses it rather than a static import.
+const TerminalPanel = lazy(() => import('./TerminalPanel'))
+
 const TABS: { view: BottomView; icon: typeof Terminal; label: string }[] = [
-  { view: 'output', icon: Terminal, label: 'Output' },
+  // The real interactive shell wears the ">_" glyph; the build/run log (Output)
+  // takes a neutral document icon now that a genuine terminal exists.
+  { view: 'output', icon: ScrollText, label: 'Output' },
+  { view: 'terminal', icon: Terminal, label: 'Terminal' },
   { view: 'serial', icon: Radio, label: 'Serial Monitor' },
   { view: 'problems', icon: AlertTriangle, label: 'Problems' }
 ]
@@ -13,6 +22,19 @@ const TABS: { view: BottomView; icon: typeof Terminal; label: string }[] = [
 export default function BottomPanel(): JSX.Element {
   const { bottomView, setBottom, toggleBottom, clearOutput, clearSerial, diagnostics, bottomHeight } = useStore()
   const problemCount = diagnostics.length
+  // Mount the terminal lazily on first open, then keep it mounted (hidden when
+  // another tab is active) so a running shell and its scrollback are not torn
+  // down every time the user peeks at Output or Problems.
+  const [termOpened, setTermOpened] = useState(bottomView === 'terminal')
+  useEffect(() => {
+    if (bottomView === 'terminal') setTermOpened(true)
+  }, [bottomView])
+
+  const clear = (): void => {
+    if (bottomView === 'terminal') window.__cortexTerminal?.clear()
+    else if (bottomView === 'serial') clearSerial()
+    else clearOutput()
+  }
 
   return (
     <div className="flex shrink-0 flex-col bg-ide-panel" style={{ height: bottomHeight }}>
@@ -44,9 +66,10 @@ export default function BottomPanel(): JSX.Element {
         </div>
         <div className="row shrink-0 gap-0.5 pr-1 text-ide-muted">
           <button
-            className="rounded p-1 hover:bg-ide-hover hover:text-ide-text"
+            className="rounded p-1 hover:bg-ide-hover hover:text-ide-text disabled:opacity-30 disabled:hover:bg-transparent"
             title="Clear"
-            onClick={() => (bottomView === 'serial' ? clearSerial() : clearOutput())}
+            onClick={clear}
+            disabled={bottomView === 'problems'}
           >
             <Trash2 size={14} />
           </button>
@@ -55,10 +78,22 @@ export default function BottomPanel(): JSX.Element {
           </button>
         </div>
       </div>
-      <div className="min-h-0 flex-1">
+      <div className="relative min-h-0 flex-1">
         {bottomView === 'output' && <OutputConsole />}
         {bottomView === 'serial' && <SerialMonitor />}
         {bottomView === 'problems' && <ProblemsPanel />}
+        {/* Kept mounted once opened; hidden (not unmounted) when inactive. */}
+        {termOpened && (
+          <div className={bottomView === 'terminal' ? 'h-full' : 'hidden'}>
+            <Suspense
+              fallback={
+                <div className="grid h-full place-items-center text-[12px] text-ide-faint">Loading terminal...</div>
+              }
+            >
+              <TerminalPanel active={bottomView === 'terminal'} />
+            </Suspense>
+          </div>
+        )}
       </div>
     </div>
   )

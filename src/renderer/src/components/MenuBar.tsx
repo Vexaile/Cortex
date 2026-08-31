@@ -181,6 +181,8 @@ export default function MenuBar(): JSX.Element {
     {
       label: 'Tools',
       items: [
+        { label: 'Terminal', hint: 'Ctrl+`', disabled: !s.workspaceRoot, onClick: () => s.openTerminal() },
+        { sep: true },
         { label: 'Serial Monitor', hint: 'Ctrl+Shift+M', onClick: () => openSerial(false) },
         { label: 'Serial Plotter', onClick: () => openSerial(true) },
         { sep: true },

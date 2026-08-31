@@ -153,8 +153,13 @@ export default function App(): JSX.Element {
         e.preventDefault()
         toggleSidebar()
       } else if (mod && e.key === '`') {
+        // VS Code parity: toggle the integrated terminal. Hide it when it is the
+        // visible terminal in the editor; otherwise open it (openTerminal leaves
+        // the simulator and no-ops with no workspace, so this never dead-ends).
         e.preventDefault()
-        toggleBottom()
+        const st = useStore.getState()
+        if (st.bottomVisible && st.bottomView === 'terminal' && st.mainView === 'editor') toggleBottom()
+        else st.openTerminal()
       } else if (mod && e.shiftKey && e.key.toLowerCase() === 'm') {
         // Serial Monitor (the accelerator the Tools menu advertises).
         e.preventDefault()

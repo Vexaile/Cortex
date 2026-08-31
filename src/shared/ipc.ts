@@ -78,6 +78,17 @@ export const IPC = {
   SIM_EVENT: 'sim:event', // main -> renderer (pin/pwm/serial/system)
   SIM_EXIT: 'sim:exit', // main -> renderer
 
+  // Integrated terminal (pty-backed shell). A user-driven terminal is
+  // user-authorized: keystrokes go to the user's own shell at the user's own
+  // privileges. AI-initiated commands do NOT flow here; they stay behind the
+  // command allowlist / approval gate.
+  TERMINAL_CREATE: 'terminal:create', // invoke -> TerminalCreateResult
+  TERMINAL_INPUT: 'terminal:input', // renderer -> main: user keystrokes
+  TERMINAL_RESIZE: 'terminal:resize', // renderer -> main: cols/rows
+  TERMINAL_KILL: 'terminal:kill', // renderer -> main: dispose a session
+  TERMINAL_DATA: 'terminal:data', // main -> renderer: shell output
+  TERMINAL_EXIT: 'terminal:exit', // main -> renderer: shell exited
+
   // Serial
   SERIAL_LIST: 'serial:list',
   SERIAL_OPEN: 'serial:open',
@@ -464,6 +475,32 @@ export type SimEvent =
 export interface SimExit {
   id: string
   code: number | null
+}
+
+// ---- Integrated terminal --------------------------------------------------
+
+export interface TerminalCreateRequest {
+  /** Renderer-minted session id, correlated on data/exit/input/resize/kill. */
+  id: string
+  cols: number
+  rows: number
+}
+
+/** The cwd is chosen in main from the trusted open-workspace root, never from a
+ *  renderer-supplied string, so it is reported back for display only. */
+export type TerminalCreateResult =
+  | { ok: true; id: string; shell: string; cwd: string }
+  | { ok: false; error: string }
+
+export interface TerminalDataChunk {
+  id: string
+  data: string
+}
+
+export interface TerminalExit {
+  id: string
+  exitCode: number
+  signal?: number
 }
 
 export interface SerialPortDescriptor {

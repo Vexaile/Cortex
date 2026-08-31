@@ -285,7 +285,7 @@ export type SidebarView =
   | 'serial'
   | 'ai'
   | 'settings'
-export type BottomView = 'output' | 'serial' | 'problems'
+export type BottomView = 'output' | 'serial' | 'problems' | 'terminal'
 
 let runCounter = 0
 const nextRunId = (): string => `run-${++runCounter}`
@@ -466,6 +466,7 @@ interface State {
   setSidebar: (v: SidebarView) => void
   toggleSidebar: () => void
   setBottom: (v: BottomView) => void
+  openTerminal: () => void
   toggleBottom: () => void
   setSerialPlot: (on: boolean) => void
   toggleAi: () => void
@@ -741,6 +742,12 @@ export const useStore = create<State>((set, get) => ({
       tree
     })
     await window.api.watchStart(path)
+    // The old project's shell is rooted in a folder the user has left, so tear
+    // it down like the other project processes. Done AFTER watchStart (which
+    // sets the main-process workspace root) and the store update above, so when
+    // a visible terminal respawns it does so in the NEW workspace, never racing
+    // ahead of the root switch. No-op if the terminal was never opened.
+    window.__cortexTerminal?.dispose()
     // Free the previous project's language servers (each holds a background
     // index in memory); keep only this root's.
     void window.api.lspDisposeRoot(path)
@@ -787,6 +794,10 @@ export const useStore = create<State>((set, get) => ({
       // closed from the simulator would otherwise leave a blank canvas.
       mainView: 'editor'
     })
+    // Kill the shell AFTER clearing workspaceRoot, so the terminal panel (which
+    // guards respawn on an open workspace) tears down to Welcome without
+    // spawning a stray shell in the home directory.
+    window.__cortexTerminal?.dispose()
     // Do not reopen this folder on next launch now that it was deliberately closed.
     try {
       localStorage.removeItem(LAST_WORKSPACE_KEY)
@@ -1033,6 +1044,16 @@ export const useStore = create<State>((set, get) => ({
   },
   setBottom(v) {
     set({ bottomView: v, bottomVisible: true })
+  },
+  openTerminal() {
+    // The bottom dock (and the terminal) only render in the editor view of an
+    // open workspace, so every terminal entry point routes through here: leave
+    // the simulator first, and no-op with no workspace (the menu item that
+    // advertises it is disabled in that state). Without this, Ctrl+`, the Tools
+    // item, and the palette command silently did nothing from the simulator or
+    // the Welcome screen.
+    if (!get().workspaceRoot) return
+    set({ mainView: 'editor', bottomView: 'terminal', bottomVisible: true })
   },
   toggleBottom() {
     set({ bottomVisible: !get().bottomVisible })

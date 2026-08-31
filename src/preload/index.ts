@@ -28,7 +28,11 @@ import type {
   DebugOutput,
   SimStartRequest,
   SimEvent,
-  SimExit
+  SimExit,
+  TerminalCreateRequest,
+  TerminalCreateResult,
+  TerminalDataChunk,
+  TerminalExit
 } from '../shared/ipc'
 import type { LspCall, LspAvailability, LspDiagnosticsPush, LspServerExit, LspBusy } from '../shared/lsp'
 
@@ -120,6 +124,18 @@ const api = {
     ipcRenderer.invoke(IPC.SIM_INPUT, id, pin, value),
   onSimEvent: (cb: (e: SimEvent) => void): Unsub => on(IPC.SIM_EVENT, cb),
   onSimExit: (cb: (e: SimExit) => void): Unsub => on(IPC.SIM_EXIT, cb),
+
+  // integrated terminal (pty)
+  terminal: {
+    create: (req: TerminalCreateRequest): Promise<TerminalCreateResult> =>
+      ipcRenderer.invoke(IPC.TERMINAL_CREATE, req),
+    input: (id: string, data: string): void => ipcRenderer.send(IPC.TERMINAL_INPUT, id, data),
+    resize: (id: string, cols: number, rows: number): void =>
+      ipcRenderer.send(IPC.TERMINAL_RESIZE, id, cols, rows),
+    kill: (id: string): void => ipcRenderer.send(IPC.TERMINAL_KILL, id),
+    onData: (cb: (c: TerminalDataChunk) => void): Unsub => on(IPC.TERMINAL_DATA, cb),
+    onExit: (cb: (e: TerminalExit) => void): Unsub => on(IPC.TERMINAL_EXIT, cb)
+  },
 
   // serial
   serialList: (): Promise<SerialPortDescriptor[]> => ipcRenderer.invoke(IPC.SERIAL_LIST),
