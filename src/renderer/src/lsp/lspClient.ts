@@ -84,6 +84,41 @@ function contentsToMarkdown(c: LspContents): string {
   return c.value ?? ''
 }
 
+const LANG_LABEL: Record<LspLang, string> = { cpp: 'C++', python: 'Python', rust: 'Rust' }
+// A real signal a symbol comes from the language's own standard library, not a
+// guess: clangd's completion `detail` for a std:: symbol names the namespace in
+// the signature, and pyright's `documentation` for a builtin/stdlib symbol
+// names the defining module. Deliberately narrow (word-boundary matches on
+// well-known module names) rather than broad, so this stays a claim backed by
+// the server's own text instead of a label slapped on everything.
+const STD_LIB_HINT: Record<LspLang, RegExp> = {
+  cpp: /\b(?:std|__gnu_cxx)::/,
+  python: /\b(?:builtins|typing|collections|itertools|functools|json|re|math|random|datetime|pathlib|io|os|sys|string|enum|dataclasses)\b/,
+  rust: /\bstd::/
+}
+
+/**
+ * Monaco renders `detail` right-aligned on the suggestion row (VS Code's
+ * IntelliSense look this is matching). Raw LSP detail is often just a type
+ * ("int") or a full signature, or nothing at all for a pyright local - none of
+ * which tells a user WHERE something comes from at a glance. This adds that
+ * without inventing information the server didn't provide.
+ */
+function friendlyDetail(m: Mon, it: LspCompletion, lang: LspLang): string | undefined {
+  const K = m.languages.CompletionItemKind
+  const kind = completionKind(m, it.kind)
+  if (kind === K.Variable || kind === K.Field || kind === K.Property) {
+    return it.detail ? `Variable · ${it.detail}` : 'Variable in this file'
+  }
+  if (kind === K.Constant) return it.detail ? `Constant · ${it.detail}` : 'Constant in this file'
+  if (kind === K.Function || kind === K.Method || kind === K.Class || kind === K.Module) {
+    const doc = it.documentation ? contentsToMarkdown(it.documentation as LspContents) : ''
+    const haystack = `${it.label} ${it.detail ?? ''} ${doc}`
+    if (STD_LIB_HINT[lang].test(haystack)) return `${LANG_LABEL[lang]} standard library`
+  }
+  return it.detail
+}
+
 /** Send any debounced edit for a doc immediately, so a following request sees
  * the current buffer rather than the version clangd last heard about. */
 function flushChange(doc: Doc): void {
@@ -123,8 +158,6 @@ const REGISTRATIONS: Array<[LspLang, string]> = [
 
 function registerProviders(m: Mon): void {
   for (const [lang, id] of REGISTRATIONS) {
-    void lang // the providers resolve their server from the document, not this
-
     m.languages.registerCompletionItemProvider(id, {
       triggerCharacters: ['.', '>', ':', '<', '"', '/', '*'],
       async provideCompletionItems(model, position, _context, token) {
@@ -149,7 +182,7 @@ function registerProviders(m: Mon): void {
             kind: completionKind(m, it.kind),
             insertText: it.insertText ?? it.textEdit?.newText ?? it.label,
             insertTextRules: it.insertTextFormat === 2 ? m.languages.CompletionItemInsertTextRule.InsertAsSnippet : undefined,
-            detail: it.detail,
+            detail: friendlyDetail(m, it, lang),
             documentation: it.documentation ? { value: contentsToMarkdown(it.documentation as LspContents) } : undefined,
             sortText: it.sortText,
             filterText: it.filterText,

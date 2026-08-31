@@ -261,18 +261,31 @@ export default function FileExplorer(): JSX.Element {
     onCancel: cancelDialog
   }
 
-  const menuActions = menu
+  // Grouped like a native editor's context menu: creation, then clipboard, then
+  // the renaming/destructive actions last, with a divider between each group
+  // rather than one flat list.
+  interface MenuAction {
+    label: string
+    run: () => void
+    danger?: boolean
+  }
+  const menuGroups: MenuAction[][] = menu
     ? [
-        { label: 'New File', run: () => startCreate('newFile', menu.node) },
-        { label: 'New Folder', run: () => startCreate('newFolder', menu.node) },
-        { label: 'Rename', run: () => startRename(menu.node) },
-        {
-          label: 'Delete',
-          run: () => {
-            if (window.confirm(`Delete ${menu.node.name}? This cannot be undone.`)) void deleteEntry(menu.node.path)
+        [
+          { label: 'New File', run: () => startCreate('newFile', menu.node) },
+          { label: 'New Folder', run: () => startCreate('newFolder', menu.node) }
+        ],
+        [{ label: 'Copy Path', run: () => void navigator.clipboard?.writeText(menu.node.path) }],
+        [
+          { label: 'Rename', run: () => startRename(menu.node) },
+          {
+            label: 'Delete',
+            danger: true,
+            run: () => {
+              if (window.confirm(`Delete ${menu.node.name}? This cannot be undone.`)) void deleteEntry(menu.node.path)
+            }
           }
-        },
-        { label: 'Copy Path', run: () => void navigator.clipboard?.writeText(menu.node.path) }
+        ]
       ]
     : []
 
@@ -301,7 +314,13 @@ export default function FileExplorer(): JSX.Element {
               className="rounded p-1 hover:bg-ide-hover hover:text-ide-text"
               onClick={async () => {
                 setBusy(true)
+                const start = Date.now()
                 await refreshTree()
+                // A local readDir is often faster than a frame, so the spin could
+                // start and finish between two paints - the click looked like it
+                // did nothing. Floor the busy state so it's actually visible.
+                const rest = 400 - (Date.now() - start)
+                if (rest > 0) await new Promise((r) => setTimeout(r, rest))
                 setBusy(false)
               }}
               title="Refresh"
@@ -347,21 +366,25 @@ export default function FileExplorer(): JSX.Element {
       {/* context menu */}
       {menu && (
         <div
-          className="fixed z-50 min-w-[160px] rounded-md border border-ide-border bg-ide-bar py-1 text-[12px] shadow-xl"
+          className="fixed z-50 min-w-[220px] overflow-hidden rounded-md border border-ide-border bg-ide-bar py-1.5 text-[13px] shadow-2xl"
           style={{ left: menu.x, top: menu.y }}
           onClick={(e) => e.stopPropagation()}
         >
-          {menuActions.map((a) => (
-            <button
-              key={a.label}
-              className={`block w-full px-3 py-1 text-left hover:bg-ide-hover ${a.label === 'Delete' ? 'text-ide-red' : ''}`}
-              onClick={() => {
-                a.run()
-                setMenu(null)
-              }}
-            >
-              {a.label}
-            </button>
+          {menuGroups.map((group, gi) => (
+            <div key={gi} className={gi > 0 ? 'mt-1.5 border-t border-ide-border pt-1.5' : ''}>
+              {group.map((a) => (
+                <button
+                  key={a.label}
+                  className={`block w-full px-4 py-1.5 text-left hover:bg-ide-hover ${a.danger ? 'text-ide-red' : ''}`}
+                  onClick={() => {
+                    a.run()
+                    setMenu(null)
+                  }}
+                >
+                  {a.label}
+                </button>
+              ))}
+            </div>
           ))}
         </div>
       )}

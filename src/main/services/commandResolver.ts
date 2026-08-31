@@ -23,15 +23,28 @@ import { isBareCommand } from '../../shared/security'
 
 const IS_WIN = process.platform === 'win32'
 
-/** Windows executable extensions, in the order the shell would try them. */
-function extensions(): string[] {
+/**
+ * Windows executable extensions, in the order the shell would try them.
+ *
+ * `cmd` decides whether the bare (no-extension) form belongs at the front or
+ * not at all. An npm-installed tool (pyright, notably) puts BOTH a `.cmd`
+ * shim AND a bare, extensionless POSIX shell shim in the same PATH directory
+ * (for Git-Bash/WSL). Trying '' first, unconditionally, matched that POSIX
+ * shim ahead of the real `.cmd` - a file Windows cannot execute at all, so
+ * the spawn failed instantly rather than the tool ever running. '' only
+ * belongs first when the caller already named an extension explicitly (e.g.
+ * "clangd.exe"): then it is cmd matching itself, not a wrong file winning a
+ * bare-name race.
+ */
+function extensions(cmd: string): string[] {
   if (!IS_WIN) return ['']
   const pathext = process.env['PATHEXT'] || '.COM;.EXE;.BAT;.CMD'
   // Lowercased: PATHEXT is conventionally uppercase, the filesystem is
   // case-insensitive either way, and 'python.EXE' in the Output panel's command
-  // line looks like a bug. '' comes first so an explicit `foo.exe` argument
-  // still matches itself.
-  return ['', ...pathext.split(';').filter(Boolean).map((e) => e.toLowerCase())]
+  // line looks like a bug.
+  const exts = pathext.split(';').filter(Boolean).map((e) => e.toLowerCase())
+  if (exts.some((e) => cmd.toLowerCase().endsWith(e))) return ['']
+  return exts
 }
 
 function isExecutableFile(p: string): boolean {
@@ -50,7 +63,7 @@ function isExecutableFile(p: string): boolean {
 export function resolveOnPath(cmd: string): string | null {
   const dirs = (process.env['PATH'] || '').split(delimiter).filter((d) => d && isAbsolute(d))
   for (const dir of dirs) {
-    for (const ext of extensions()) {
+    for (const ext of extensions(cmd)) {
       const candidate = join(dir, cmd + ext)
       if (isExecutableFile(candidate)) return candidate
     }
