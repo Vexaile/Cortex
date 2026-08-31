@@ -169,16 +169,18 @@ function stdlibIndex(lang: LspLang): Map<string, { entry: StdlibSymbol; libSince
 }
 
 /**
- * Auto-add call parens to a bare function/method completion, cursor landing
- * inside them, the way VS Code/Pylance/CLion all do. Bare pyright does NOT do
- * this itself (`completeFunctionParens` is a Pylance-only setting, confirmed
- * absent from pyright's own source - see LANG_SETTINGS's comment in
- * lspService.ts), so without this "print" only ever completed to "print", not
- * "print()". Deliberately narrow: only when the server's own insertText is
- * still the bare label (no "(" already in it - respect a real arg-snippet
- * from clangd/rust-analyzer rather than double up on it), and only for
- * Function/Method - Class/Constructor is left alone, since completing a class
- * name is just as often a type annotation as it is a call.
+ * Auto-add call parens to a bare completion, cursor landing inside them, the
+ * way VS Code/Pylance/CLion all do. Bare pyright does NOT do this itself
+ * (`completeFunctionParens` is a Pylance-only setting, confirmed absent from
+ * pyright's own source - see LANG_SETTINGS's comment in lspService.ts), so
+ * without this "print" only ever completed to "print", not "print()".
+ * Covers Class/Constructor too, not just Function/Method: `str`, `int`,
+ * `list` etc. are LSP-typed as Class but are exactly as call-shaped as any
+ * function in normal use (`str(x)`), and a completion in a call-position
+ * beats one in a type-annotation position often enough that the request was
+ * explicitly for "ALL functions", parens included. Only skipped when the
+ * server's own insertText already has "(" in it - that's a real arg-snippet
+ * from clangd/rust-analyzer, not something to double up on.
  */
 function withCallParens(
   m: Mon,
@@ -187,7 +189,7 @@ function withCallParens(
   alreadySnippet: boolean
 ): { insertText: string; asSnippet: boolean } {
   const K = m.languages.CompletionItemKind
-  const isCallable = kind === K.Function || kind === K.Method
+  const isCallable = kind === K.Function || kind === K.Method || kind === K.Class || kind === K.Constructor
   if (isCallable && !alreadySnippet && !insertText.includes('(')) {
     return { insertText: `${insertText}($0)`, asSnippet: true }
   }
