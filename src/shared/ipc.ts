@@ -267,6 +267,28 @@ export interface PinUsage {
   mode?: string
 }
 
+export type BusKind = 'i2c' | 'spi' | 'uart'
+
+export interface BusUsage {
+  file: string
+  line: number
+  bus: BusKind
+  /** The object the code called this on: "Wire", "Wire1", "SPI", "Serial1", ... */
+  instance: string
+  role: string
+  /** i2c only, and only when the address in source is a literal (not a #define/variable). */
+  address?: string
+  /** uart only: the baud rate passed to .begin(), when it's a literal. */
+  baud?: number
+}
+
+export interface LibraryUsage {
+  file: string
+  line: number
+  /** The #include target verbatim, e.g. "Adafruit_MPU6050.h" or "freertos/task.h". */
+  header: string
+}
+
 export interface ProjectModel {
   languages: LanguageBreakdown[]
   boards: BoardInfo[]
@@ -276,6 +298,10 @@ export interface ProjectModel {
    *  a sample, not exhaustive, and callers (the AI context builder especially)
    *  should say so rather than imply completeness. */
   pinsTruncated: boolean
+  buses: BusUsage[]
+  busesTruncated: boolean
+  libraries: LibraryUsage[]
+  librariesTruncated: boolean
 }
 
 // ---- Embedded boards ------------------------------------------------------

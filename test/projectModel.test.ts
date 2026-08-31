@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { parsePlatformioIni, scanPins, buildProjectModel } from '../src/main/services/projectModelService'
-import type { PinUsage } from '../src/shared/ipc'
+import { parsePlatformioIni, scanPins, scanBuses, scanIncludes, buildProjectModel } from '../src/main/services/projectModelService'
+import type { PinUsage, BusUsage, LibraryUsage } from '../src/shared/ipc'
 
 describe('parsePlatformioIni', () => {
   it('reads board/platform/framework from a single env', () => {
@@ -86,6 +86,108 @@ describe('scanPins', () => {
   })
 })
 
+describe('scanBuses', () => {
+  it('finds Wire begin/beginTransmission/requestFrom with literal addresses', () => {
+    const out: BusUsage[] = []
+    scanBuses('m.cpp', 'Wire.begin();\nWire.beginTransmission(0x3C);\nWire.requestFrom(0x3C, 6);', out, 100)
+    expect(out.map((b) => ({ role: b.role, address: b.address }))).toEqual([
+      { role: 'begin', address: undefined },
+      { role: 'beginTransmission', address: '0x3C' },
+      { role: 'requestFrom', address: '0x3C' }
+    ])
+  })
+
+  it('does not record a variable or #define as an address', () => {
+    const out: BusUsage[] = []
+    scanBuses('m.cpp', 'Wire.beginTransmission(MPU_ADDR);', out, 100)
+    expect(out).toHaveLength(1)
+    expect(out[0].address).toBeUndefined()
+  })
+
+  it('does not treat Wire.begin(arg) first arg as an address (ambiguous: AVR slave addr vs ESP32 SDA pin)', () => {
+    const out: BusUsage[] = []
+    scanBuses('m.cpp', 'Wire.begin(21, 22);', out, 100)
+    expect(out[0].address).toBeUndefined()
+  })
+
+  it('separates Wire and Wire1 instances', () => {
+    const out: BusUsage[] = []
+    scanBuses('m.cpp', 'Wire.begin();\nWire1.begin();', out, 100)
+    expect(out.map((b) => b.instance)).toEqual(['Wire', 'Wire1'])
+  })
+
+  it('finds SPI calls and Serial.begin with its baud rate', () => {
+    const out: BusUsage[] = []
+    scanBuses('m.cpp', 'SPI.begin();\nSPI.transfer(0xFF);\nSerial2.begin(9600);', out, 100)
+    expect(out.map((b) => ({ bus: b.bus, instance: b.instance, baud: b.baud }))).toEqual([
+      { bus: 'spi', instance: 'SPI', baud: undefined },
+      { bus: 'spi', instance: 'SPI', baud: undefined },
+      { bus: 'uart', instance: 'Serial2', baud: 9600 }
+    ])
+  })
+
+  it('still records a UART whose baud is a macro or variable, just without the number', () => {
+    const out: BusUsage[] = []
+    scanBuses('m.cpp', 'Serial1.begin(GPS_BAUD);\nSerial.begin(config.baud);', out, 100)
+    expect(out.map((b) => ({ instance: b.instance, baud: b.baud }))).toEqual([
+      { instance: 'Serial1', baud: undefined },
+      { instance: 'Serial', baud: undefined }
+    ])
+  })
+
+  it('ignores bus calls in // comments and string literals', () => {
+    const out: BusUsage[] = []
+    scanBuses(
+      'm.cpp',
+      '// Wire.beginTransmission(0x27);\nSerial.println("try Wire.begin() first");\nWire.begin(); // real',
+      out,
+      100
+    )
+    expect(out).toEqual([{ file: 'm.cpp', line: 3, bus: 'i2c', instance: 'Wire', role: 'begin' }])
+  })
+
+  it('does not match lookalike identifiers', () => {
+    const out: BusUsage[] = []
+    scanBuses('m.cpp', 'myWire.begin();\nOneWire.begin();\nSerialLogger.begin(1);', out, 100)
+    expect(out).toEqual([])
+  })
+
+  it('stops at the cap', () => {
+    const out: BusUsage[] = []
+    scanBuses('m.cpp', Array.from({ length: 10 }, () => 'SPI.transfer(1);').join('\n'), out, 3)
+    expect(out).toHaveLength(3)
+  })
+})
+
+describe('scanIncludes', () => {
+  it('captures both <> and "" include targets with line numbers', () => {
+    const out: LibraryUsage[] = []
+    scanIncludes('m.cpp', '#include <Wire.h>\n#include "config.h"\nint x;', out, 100)
+    expect(out).toEqual([
+      { file: 'm.cpp', line: 1, header: 'Wire.h' },
+      { file: 'm.cpp', line: 2, header: 'config.h' }
+    ])
+  })
+
+  it('keeps subdirectory include paths verbatim', () => {
+    const out: LibraryUsage[] = []
+    scanIncludes('m.cpp', '#include <freertos/task.h>', out, 100)
+    expect(out[0].header).toBe('freertos/task.h')
+  })
+
+  it('accepts legal whitespace between # and include', () => {
+    const out: LibraryUsage[] = []
+    scanIncludes('m.cpp', '#  include <Adafruit_MPU6050.h>\n#\tinclude "cfg.h"', out, 100)
+    expect(out.map((l) => l.header)).toEqual(['Adafruit_MPU6050.h', 'cfg.h'])
+  })
+
+  it('ignores commented-out and malformed includes', () => {
+    const out: LibraryUsage[] = []
+    scanIncludes('m.cpp', '// #include <Wire.h> is handled elsewhere\n#include Wire.h', out, 100)
+    expect(out).toEqual([])
+  })
+})
+
 describe('buildProjectModel', () => {
   let root: string
   beforeEach(() => {
@@ -150,7 +252,40 @@ describe('buildProjectModel', () => {
       boards: [],
       pins: [],
       pinsTruncated: false,
+      buses: [],
+      busesTruncated: false,
+      libraries: [],
+      librariesTruncated: false,
       toolchains: model.toolchains // shape-only, see above
     })
+  })
+
+  it('collects bus usage and driver includes from source files', async () => {
+    mkdirSync(join(root, 'src'))
+    writeFileSync(
+      join(root, 'src', 'main.cpp'),
+      [
+        '#include <Wire.h>',
+        '#include <Adafruit_MPU6050.h>',
+        'void setup() {',
+        '  Wire.begin();',
+        '  Wire.beginTransmission(0x68);',
+        '  Serial.begin(115200);',
+        '}'
+      ].join('\n'),
+      'utf8'
+    )
+
+    const model = await buildProjectModel(root)
+    expect(model.buses.map((b) => ({ bus: b.bus, instance: b.instance, role: b.role }))).toEqual([
+      { bus: 'i2c', instance: 'Wire', role: 'begin' },
+      { bus: 'i2c', instance: 'Wire', role: 'beginTransmission' },
+      { bus: 'uart', instance: 'Serial', role: 'begin' }
+    ])
+    expect(model.buses[1].address).toBe('0x68')
+    expect(model.buses[2].baud).toBe(115200)
+    expect(model.libraries.map((l) => l.header)).toEqual(['Wire.h', 'Adafruit_MPU6050.h'])
+    expect(model.busesTruncated).toBe(false)
+    expect(model.librariesTruncated).toBe(false)
   })
 })

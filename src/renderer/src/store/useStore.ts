@@ -247,6 +247,7 @@ export type SidebarView =
   | 'search'
   | 'boards'
   | 'libraries'
+  | 'hardware'
   | 'debug'
   | 'serial'
   | 'ai'

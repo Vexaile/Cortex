@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Sparkles, Send, X, ScanSearch, Zap, Cpu, Settings2 } from 'lucide-react'
 import { useStore } from '../store/useStore'
+import { buildHardwareGraph } from '@shared/hardwareGraph'
 import PanelHeader from './PanelHeader'
 
 const QUICK_ACTIONS = [
@@ -26,10 +27,12 @@ export default function AiPanel(): JSX.Element {
 
   // The AI's whole differentiator is understanding the system the code
   // controls, not just the code - so give it the derived project model, not
-  // just the open file. Scoped to what's likely relevant: the board/platform
-  // (whole-project, it's small) and pin usage (only the active file's, not
-  // all 200 possible entries - a firmware question is almost always about
-  // the file open in front of the person asking it).
+  // just the open file. Scoped to what's likely relevant: the board/platform,
+  // buses, and recognized devices (whole-project - these lists are small) and
+  // pin usage (only the active file's, not all 200 possible entries - a
+  // firmware question is almost always about the file open in front of the
+  // person asking it).
+  const graph = useMemo(() => (projectModel ? buildHardwareGraph(projectModel) : null), [projectModel])
   const projectSummary = (): string => {
     if (!projectModel) return ''
     const lines: string[] = []
@@ -42,6 +45,23 @@ export default function AiPanel(): JSX.Element {
     }
     if (projectModel.languages.length) {
       lines.push(`Languages: ${projectModel.languages.map((l) => `${l.label} (${l.fileCount})`).join(', ')}`)
+    }
+    if (graph) {
+      // The scans cap out on very large projects; when they did, say so
+      // rather than presenting a partial list as the whole system.
+      const caveat = graph.incomplete ? ' [partial scan - list may be incomplete]' : ''
+      const buses = graph.nodes.filter((n) => n.kind === 'bus')
+      if (buses.length) {
+        lines.push(`Buses${caveat}: ${buses.map((b) => b.label + (b.detail ? ` (${b.detail})` : '')).join('; ')}`)
+      }
+      const devices = graph.nodes.filter((n) => n.kind === 'device')
+      if (devices.length) {
+        const desc = devices.map((d) => {
+          const onBus = graph.edges.find((e) => e.from === d.id && e.relation === 'likely-on-bus')
+          return `${d.label} (${d.detail}${onBus ? `; ${onBus.note}` : ''})`
+        })
+        lines.push(`Devices (driver includes found in source)${caveat}: ${desc.join('; ')}`)
+      }
     }
     if (activeTab) {
       const norm = (p: string): string => p.replace(/\\/g, '/')

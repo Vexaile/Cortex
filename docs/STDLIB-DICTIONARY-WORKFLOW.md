@@ -123,6 +123,10 @@ call-parens insertion (`withCallParens` in lspClient.ts) so a bare function
 completion like `print` inserts `print()` with the cursor between the
 parens, regardless of whether the server itself supports that.
 
-Not yet built: the actual recurring agent that expands the dictionary
-automatically. The format, loader, and merge path are proven; what's left is
-scheduling the agent described above to keep growing the JSON files.
+The recurring agent is scheduled: a daily cloud routine (Claude Code
+routines) that follows this document - picks one under-covered library per
+run, adds 10-20 verified entries to the JSON files, runs the checks, and
+commits. It covers the stdlib dictionary; extending its scope to the
+hardware DEVICE_MAP in `src/shared/hardwareGraph.ts` (same curation rules:
+small verified batches, real documentation only) is the intended next step
+but is not part of its task yet.
