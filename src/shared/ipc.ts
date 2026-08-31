@@ -99,7 +99,9 @@ export const IPC = {
   // App
   APP_INFO: 'app:info',
   SETTINGS_GET: 'settings:get',
-  SETTINGS_SET: 'settings:set'
+  SETTINGS_SET: 'settings:set',
+  APP_CLOSE_REQUESTED: 'app:closeRequested', // main -> renderer: save dirty tabs, then confirm
+  APP_READY_TO_CLOSE: 'app:readyToClose' // renderer -> main (invoke), once saveAll() settles
 } as const
 
 export type LanguageId =

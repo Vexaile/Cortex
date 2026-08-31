@@ -33,6 +33,7 @@ export default function App(): JSX.Element {
     refreshBoardStatus,
     refreshTree,
     saveActive,
+    saveAll,
     runActive,
     toggleSidebar,
     toggleBottom,
@@ -149,6 +150,15 @@ export default function App(): JSX.Element {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [saveActive, toggleSidebar, toggleBottom, runActive])
+
+  // Closing the window used to just discard unsaved tabs. Main intercepts the
+  // close once and waits here instead of dropping the window immediately, so
+  // there's time to flush every dirty tab to disk before it actually goes.
+  useEffect(() => {
+    return window.api.onCloseRequested(() => {
+      void saveAll().finally(() => void window.api.readyToClose())
+    })
+  }, [saveAll])
 
   // The menu bar lives in the title bar and cannot reach this component's
   // palette state directly, so its Command Palette / Quick Open items post an

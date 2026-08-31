@@ -44,6 +44,11 @@ const docsByUri = new Map<string, { model: monaco.editor.ITextModel; doc: Doc }>
 const changeTimers = new Map<string, ReturnType<typeof setTimeout>>()
 // Latest text awaiting a debounced didChange, so a request can flush it first.
 const pendingContent = new Map<string, string>()
+// Which doc + raw LSP item a given Monaco suggestion came from, so
+// resolveCompletionItem (called with only the item, no model/position) knows
+// what to ask completionItem/resolve for. Monaco reuses the same object
+// instance between provide and resolve, so the object itself is a valid key.
+const completionOrigin = new WeakMap<monaco.languages.CompletionItem, { doc: Doc; raw: LspCompletion }>()
 
 let available: Record<LspLang, boolean> = { cpp: false, python: false, rust: false }
 let monacoRef: Mon | null = null
@@ -177,18 +182,38 @@ function registerProviders(m: Mon): void {
           endColumn: word.endColumn
         }
         return {
-          suggestions: items.slice(0, 200).map((it) => ({
-            label: it.label,
-            kind: completionKind(m, it.kind),
-            insertText: it.insertText ?? it.textEdit?.newText ?? it.label,
-            insertTextRules: it.insertTextFormat === 2 ? m.languages.CompletionItemInsertTextRule.InsertAsSnippet : undefined,
-            detail: friendlyDetail(m, it, lang),
-            documentation: it.documentation ? { value: contentsToMarkdown(it.documentation as LspContents) } : undefined,
-            sortText: it.sortText,
-            filterText: it.filterText,
-            range
-          }))
+          suggestions: items.slice(0, 200).map((it) => {
+            const suggestion: monaco.languages.CompletionItem = {
+              label: it.label,
+              kind: completionKind(m, it.kind),
+              insertText: it.insertText ?? it.textEdit?.newText ?? it.label,
+              insertTextRules: it.insertTextFormat === 2 ? m.languages.CompletionItemInsertTextRule.InsertAsSnippet : undefined,
+              detail: friendlyDetail(m, it, lang),
+              documentation: it.documentation ? { value: contentsToMarkdown(it.documentation as LspContents) } : undefined,
+              sortText: it.sortText,
+              filterText: it.filterText,
+              range
+            }
+            // Servers send full documentation lazily (resolveCompletionItem
+            // below), not eagerly for every one of 200 items - stash what that
+            // follow-up request needs to ask for THIS one.
+            completionOrigin.set(suggestion, { doc, raw: it })
+            return suggestion
+          })
         }
+      },
+      async resolveCompletionItem(item, token) {
+        const origin = completionOrigin.get(item)
+        if (!origin) return item
+        const resolved = await lspRequest<LspCompletion>(origin.doc, 'completionItem/resolve', origin.raw as object)
+        if (token.isCancellationRequested || !resolved) return item
+        // A resolved item can bring a real detail/documentation the initial
+        // list omitted, or confirm there simply isn't one - either way, don't
+        // downgrade what provideCompletionItems already had (friendlyDetail's
+        // "Variable in this file" is worth more than resolve's silence).
+        if (resolved.documentation) item.documentation = { value: contentsToMarkdown(resolved.documentation as LspContents) }
+        if (resolved.detail) item.detail = friendlyDetail(m, { ...origin.raw, detail: resolved.detail }, lang)
+        return item
       }
     })
 
@@ -289,15 +314,16 @@ async function doInitLsp(m: Mon): Promise<void> {
   window.api.onLspDiagnostics(({ uri, diagnostics }) => {
     const entry = docsByUri.get(docKey(uri))
     if (!entry || entry.model.isDisposed()) return
+    // No `code`/`source` on the marker itself: Monaco's own hover renders those
+    // as a trailing "source(code)" line (e.g. "lsp(undeclared_var_use)"), which
+    // is compiler-internals noise on top of an already-plain-English message.
     const markers: monaco.editor.IMarkerData[] = (diagnostics as LspDiagnostic[]).map((d) => ({
       severity: severity(m, d.severity),
-      message: d.source ? `${d.message} (${d.source})` : d.message,
-      code: typeof d.code === 'object' ? String(d.code.value) : d.code != null ? String(d.code) : undefined,
+      message: d.message,
       startLineNumber: d.range.start.line + 1,
       startColumn: d.range.start.character + 1,
       endLineNumber: d.range.end.line + 1,
-      endColumn: d.range.end.character + 1,
-      source: 'lsp'
+      endColumn: d.range.end.character + 1
     }))
     try {
       m.editor.setModelMarkers(entry.model, 'lsp', markers)
@@ -410,6 +436,10 @@ interface LspCompletion {
   documentation?: unknown
   sortText?: string
   filterText?: string
+  // Opaque correlation token for completionItem/resolve. Servers send back
+  // richer detail/documentation for ONE item on demand rather than eagerly for
+  // every item in a 200-deep list; `data` is what tells the server which one.
+  data?: unknown
 }
 interface LspLocation {
   uri: string

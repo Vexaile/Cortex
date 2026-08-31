@@ -8,6 +8,8 @@ release/
 build-artifacts/
 .cache/
 *.tsbuildinfo
+# electron-vite writes a timestamped temp copy of its own config during dev/build
+electron.vite.config.*.mjs
 target/
 examples/multilang/firmware.elf
 # Cortex compiled-user-program scratch outputs

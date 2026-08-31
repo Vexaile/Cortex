@@ -73,6 +73,20 @@ function createWindow(): void {
     }
   })
 
+  // Closing with unsaved tabs used to just discard them. Intercept once,
+  // ask the renderer to save everything dirty, then let the SAME close
+  // happen for real - readyToClose flips this so it isn't asked twice.
+  let readyToClose = false
+  mainWindow.on('close', (e) => {
+    if (readyToClose || !mainWindow) return
+    e.preventDefault()
+    mainWindow.webContents.send(IPC.APP_CLOSE_REQUESTED)
+  })
+  ipcMain.handleOnce(IPC.APP_READY_TO_CLOSE, () => {
+    readyToClose = true
+    mainWindow?.close()
+  })
+
   mainWindow.on('ready-to-show', () => {
     mainWindow?.show()
     // Dev-only: drive the UI and write screenshots, for the design audit loop.

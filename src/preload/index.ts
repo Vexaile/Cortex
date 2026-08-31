@@ -149,7 +149,9 @@ const api = {
   // settings / app
   getSettings: (): Promise<unknown> => ipcRenderer.invoke(IPC.SETTINGS_GET),
   setSettings: (patch: unknown): Promise<unknown> => ipcRenderer.invoke(IPC.SETTINGS_SET, patch),
-  appInfo: (): Promise<AppInfo> => ipcRenderer.invoke(IPC.APP_INFO)
+  appInfo: (): Promise<AppInfo> => ipcRenderer.invoke(IPC.APP_INFO),
+  onCloseRequested: (cb: () => void): Unsub => on(IPC.APP_CLOSE_REQUESTED, cb),
+  readyToClose: (): Promise<void> => ipcRenderer.invoke(IPC.APP_READY_TO_CLOSE)
 }
 
 export type CortexApi = typeof api
