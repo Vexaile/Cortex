@@ -100,6 +100,31 @@ export async function listAll(): Promise<BoardTarget[]> {
   }
 }
 
+/**
+ * The board's actual MCU from `arduino-cli board details` (build.mcu, e.g.
+ * "esp32", "esp32s3", "atmega328p"). This is the ground truth for the silicon,
+ * which pin-capability facts key on - the board id in the fqbn cannot be trusted
+ * (several esp32:esp32 boards run on the ESP32-S3 die). Returns null on any
+ * failure (CLI missing, core not installed, board unknown, parse error) so an
+ * undetermined MCU yields no hardware claim. The fqbn is passed as an execFile
+ * argument (no shell), so it is never interpolated into a command line.
+ */
+export async function boardMcu(fqbn: string): Promise<string | null> {
+  if (!fqbn) return null
+  try {
+    const { stdout } = await execFileAsync(CLI, ['board', 'details', '--fqbn', fqbn, '--format', 'json'], {
+      timeout: 12000,
+      windowsHide: true
+    })
+    const parsed = JSON.parse(stdout.toString() || '{}')
+    const props: string[] = Array.isArray(parsed.build_properties) ? parsed.build_properties : []
+    const mcu = props.find((p) => typeof p === 'string' && p.startsWith('build.mcu='))
+    return mcu ? mcu.slice('build.mcu='.length).trim() || null : null
+  } catch {
+    return null
+  }
+}
+
 function streamCli(
   win: BrowserWindow,
   id: string,

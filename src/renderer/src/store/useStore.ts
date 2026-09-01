@@ -20,7 +20,7 @@ import type {
 } from '@shared/ipc'
 import { langFromPath, isHeaderPath, cDriver, cppDriver, type LanguageDef } from '@shared/languages'
 import { normalizeEol, detectEol, withEol } from '@shared/diff'
-import type { EnvironmentReport } from '@shared/environment'
+import { extractMissingHeaders, type EnvironmentReport } from '@shared/environment'
 import type { LspAvailability } from '@shared/lsp'
 import type { DebugState, DebugOutput } from '@shared/ipc'
 
@@ -1850,8 +1850,11 @@ export const useStore = create<State>((set, get) => ({
     }
     const seq = ++envInspectSeq
     set({ envLoading: true })
+    // The last build's compiler diagnostics are certain evidence of missing
+    // headers; pass them so the report can confirm 'missing'.
+    const buildMissingHeaders = extractMissingHeaders(get().diagnostics)
     try {
-      const report = await window.api.envInspect(root, get().selectedFqbn || null, refresh)
+      const report = await window.api.envInspect(root, get().selectedFqbn || null, refresh, buildMissingHeaders)
       // Apply only if still the latest inspect, so a slower earlier run cannot
       // overwrite a newer report.
       if (seq === envInspectSeq) set({ environmentReport: report })
@@ -1875,14 +1878,19 @@ export const useStore = create<State>((set, get) => ({
     set({ boardTargets })
   },
   setFqbn(fqbn) {
-    set({ selectedFqbn: fqbn })
+    // A board change invalidates the previous target's build diagnostics: they
+    // describe a different toolchain/core, so they must not linger in Problems
+    // or be reused as missing-dependency evidence for the new board.
+    const changed = fqbn !== get().selectedFqbn
+    set(changed ? { selectedFqbn: fqbn, diagnostics: [] } : { selectedFqbn: fqbn })
     void get().persistProjectConfig({ boardFqbn: fqbn })
   },
   setBoardAndPort(fqbn, port) {
     // One port drives both upload and the serial monitor, the way Arduino's
     // single Board+Port selection does. serialPath is that shared port.
     if (fqbn) {
-      set({ selectedFqbn: fqbn })
+      const changed = fqbn !== get().selectedFqbn
+      set(changed ? { selectedFqbn: fqbn, diagnostics: [] } : { selectedFqbn: fqbn })
       void get().persistProjectConfig({ boardFqbn: fqbn })
     }
     if (port) set({ serialPath: port })

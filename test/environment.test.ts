@@ -4,6 +4,7 @@ import {
   normalizeHeader,
   platformIdFromFqbn,
   updateRisk,
+  extractMissingHeaders,
   type EnvInput
 } from '../src/shared/environment'
 
@@ -215,6 +216,104 @@ describe('reconcileEnvironment: dependency tiers', () => {
       })
     )
     expect(r.dependencies.find((d) => d.header === 'foo.h')?.usedAt).toHaveLength(1)
+  })
+})
+
+describe('extractMissingHeaders', () => {
+  it('pulls the not-found header out of a compiler error', () => {
+    const diags = [
+      { message: 'Foo.h: No such file or directory' },
+      { message: "fatal error: Adafruit_MPU6050.h: No such file or directory" },
+      { message: 'expected ; before }' }
+    ]
+    expect(extractMissingHeaders(diags).sort()).toEqual(['adafruit_mpu6050.h', 'foo.h'])
+  })
+  it('is empty when no missing-file errors are present', () => {
+    expect(extractMissingHeaders([{ message: 'unused variable x' }])).toEqual([])
+  })
+})
+
+describe('reconcileEnvironment: build correlation (certain missing)', () => {
+  it('upgrades an unverified header to missing when the build could not find it', () => {
+    const r = reconcileEnvironment(
+      base({
+        usedIncludes: [{ header: 'Foo.h', file: 'x.cpp', line: 1 }],
+        buildMissingHeaders: ['Foo.h']
+      })
+    )
+    const dep = r.dependencies.find((d) => d.header === 'foo.h')
+    expect(dep?.state).toBe('missing')
+    const f = r.findings.find((x) => x.id === 'missing-foo.h')
+    expect(f?.severity).toBe('error')
+    expect(f?.suggestion).toEqual({ kind: 'search-library', target: 'foo.h' })
+    expect(f?.file).toBe('x.cpp')
+  })
+  it('marks only the exact reported header missing, never a same-basename path include', () => {
+    const r = reconcileEnvironment(
+      base({
+        usedIncludes: [{ header: 'vendor/config.h', file: 'x.cpp', line: 1 }],
+        buildMissingHeaders: ['config.h'] // a DIFFERENT, bare header
+      })
+    )
+    // The build reported bare config.h, not vendor/config.h: no false missing.
+    expect(r.dependencies.find((d) => d.header === 'vendor/config.h')?.state).not.toBe('missing')
+  })
+
+  it('marks a path-qualified header missing when the build reported that exact path', () => {
+    const r = reconcileEnvironment(
+      base({
+        usedIncludes: [{ header: 'vendor/config.h', file: 'x.cpp', line: 1 }],
+        buildMissingHeaders: ['vendor/config.h']
+      })
+    )
+    expect(r.dependencies.find((d) => d.header === 'vendor/config.h')?.state).toBe('missing')
+  })
+
+  it('does not mark a resolved header missing just because the build mentioned it', () => {
+    const r = reconcileEnvironment(
+      base({
+        installedLibraries: [{ name: 'L', installedVersion: '1.0.0', latestVersion: '1.0.0', providesIncludes: ['Foo.h'] }],
+        usedIncludes: [{ header: 'Foo.h', file: 'x.cpp', line: 1 }],
+        buildMissingHeaders: ['Foo.h']
+      })
+    )
+    expect(r.dependencies.find((d) => d.header === 'foo.h')?.state).toBe('resolved')
+  })
+})
+
+describe('reconcileEnvironment: hardware pin checks', () => {
+  it('flags an output driven on an input-only ESP32 pad, with the source site', () => {
+    const r = reconcileEnvironment(
+      base({
+        fqbn: 'esp32:esp32:esp32da',
+        boardMcu: 'esp32',
+        installedCores: [{ id: 'esp32:esp32', installedVersion: '3.0.0', latestVersion: '3.0.0' }],
+        pins: [{ pin: '34', role: 'digitalWrite', file: 'm.ino', line: 7 }]
+      })
+    )
+    const f = r.findings.find((x) => x.category === 'hardware')
+    expect(f?.severity).toBe('error')
+    expect(f?.title).toContain('GPIO34')
+    expect(f).toMatchObject({ file: 'm.ino', line: 7 })
+  })
+  it('makes no hardware claim when the MCU is unknown', () => {
+    const r = reconcileEnvironment(
+      base({ fqbn: 'arduino:avr:uno', pins: [{ pin: '34', role: 'digitalWrite', file: 'm.ino', line: 7 }] })
+    )
+    expect(r.findings.some((f) => f.category === 'hardware')).toBe(false)
+  })
+  it('makes no hardware claim on an esp32:esp32 board that is actually an S3 die', () => {
+    // An esp32:esp32 board id (nano_nora) whose real MCU is esp32s3: keying on
+    // the MCU, not the fqbn, means GPIO34-as-output is correctly NOT flagged.
+    const r = reconcileEnvironment(
+      base({
+        fqbn: 'esp32:esp32:nano_nora',
+        boardMcu: 'esp32s3',
+        installedCores: [{ id: 'esp32:esp32', installedVersion: '3.0.0', latestVersion: '3.0.0' }],
+        pins: [{ pin: '34', role: 'digitalWrite', file: 'm.ino', line: 7 }]
+      })
+    )
+    expect(r.findings.some((f) => f.category === 'hardware')).toBe(false)
   })
 })
 

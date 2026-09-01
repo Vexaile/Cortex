@@ -92,6 +92,20 @@ const WORKSPACE_SCOPED = [
   'agentMessages'
 ]
 
+// A board change invalidates the previous target's build diagnostics, so they
+// must not linger and be reused as missing-dependency evidence for the new board.
+describe('board switch clears stale diagnostics', () => {
+  it('setFqbn clears diagnostics when the target changes', () => {
+    const body = SRC.slice(SRC.indexOf('setFqbn(fqbn) {'), SRC.indexOf('setBoardAndPort('))
+    expect(body).toContain('diagnostics: []')
+    expect(body).toContain('fqbn !== get().selectedFqbn')
+  })
+  it('setBoardAndPort clears diagnostics when the target changes', () => {
+    const body = SRC.slice(SRC.indexOf('setBoardAndPort(fqbn, port) {'), SRC.indexOf('async verifyBoard('))
+    expect(body).toContain('diagnostics: []')
+  })
+})
+
 describe('workspaceScopedReset', () => {
   const keys = resetKeys()
 

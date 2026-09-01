@@ -17,6 +17,8 @@
  * certain evidence; they are not emitted from static data.
  */
 
+import { pinConflicts, type PinUse } from './pinCapability'
+
 export type DependencyState = 'resolved' | 'provided-by-toolchain' | 'unverified' | 'missing'
 export type FindingSeverity = 'ok' | 'info' | 'warning' | 'error'
 export type UpdateRisk = 'low' | 'medium' | 'high' | 'unknown'
@@ -51,6 +53,16 @@ export interface EnvInput {
   installedCores: EnvInstalledCore[]
   installedLibraries: EnvInstalledLibrary[]
   usedIncludes: EnvUsedInclude[]
+  /** Headers the last build reported as not found (e.g. from a "No such file"
+   *  compiler error). These are CERTAIN evidence: an unverified header that the
+   *  compiler could not find is upgraded to `missing`. */
+  buildMissingHeaders?: string[]
+  /** GPIO pins the source uses, with roles, for hardware-capability checks. */
+  pins?: PinUse[]
+  /** The board's actual MCU (arduino-cli board details build.mcu, e.g. "esp32"),
+   *  the ground truth for pin-capability facts. Absent when it could not be
+   *  determined, in which case no hardware pin claim is made. */
+  boardMcu?: string
   /** True when the project scan hit its cap; the used-include list is a sample. */
   librariesTruncated?: boolean
   /** Whether the board toolchain (arduino-cli) could be queried at all. When
@@ -86,7 +98,7 @@ export interface UpdateStatus {
 }
 
 export interface EnvSuggestion {
-  kind: 'install-core' | 'install-library' | 'update-library'
+  kind: 'install-core' | 'install-library' | 'update-library' | 'search-library'
   target: string
   version?: string
 }
@@ -94,11 +106,14 @@ export interface EnvSuggestion {
 export interface EnvFinding {
   id: string
   severity: FindingSeverity
-  category: 'board' | 'core' | 'library' | 'update'
+  category: 'board' | 'core' | 'library' | 'update' | 'hardware'
   title: string
   detail: string
   header?: string
   library?: string
+  /** Source location, for findings tied to a specific site (e.g. a pin conflict). */
+  file?: string
+  line?: number
   suggestion?: EnvSuggestion
 }
 
@@ -146,6 +161,20 @@ export function normalizeHeader(header: string): string {
 function basename(path: string): string {
   const i = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
   return i >= 0 ? path.slice(i + 1) : path
+}
+
+/**
+ * Pull the not-found headers out of compiler diagnostics. Matches the gcc/clang
+ * "X.h: No such file or directory" wording, so a failed build becomes certain
+ * evidence that a header is missing. Returns normalized, de-duplicated headers.
+ */
+export function extractMissingHeaders(diagnostics: { message: string }[]): string[] {
+  const out = new Set<string>()
+  for (const d of diagnostics) {
+    const m = /([A-Za-z0-9_./\\-]+\.[A-Za-z0-9_]+):\s*No such file or directory/i.exec(d.message || '')
+    if (m) out.add(normalizeHeader(m[1]))
+  }
+  return [...out]
 }
 
 /** vendor:arch from a vendor:arch:board fqbn. Null when absent or malformed. */
@@ -291,6 +320,12 @@ export function reconcileEnvironment(input: EnvInput): EnvironmentReport {
     }
   }
 
+  // Headers the compiler could not find (certain evidence of missing). Matched
+  // on the FULL normalized header only: the compiler and the scanner both spell
+  // it from the same #include, so an exact match is right, and a basename
+  // fallback would cross-attribute a bare "config.h" to a used "vendor/config.h".
+  const missingSet = new Set((input.buildMissingHeaders ?? []).map((h) => normalizeHeader(h)))
+
   for (const dep of byHeader.values()) {
     // Provider first: if an installed library declares it, that is the truth,
     // and it correctly resolves an extension-less header a library ships.
@@ -306,13 +341,48 @@ export function reconcileEnvironment(input: EnvInput): EnvironmentReport {
       dep.state = 'provided-by-toolchain'
       continue
     }
+    // A build that reported this exact header not-found is certain evidence it
+    // is missing; that beats the static "unverified".
+    if (missingSet.has(dep.header)) {
+      dep.state = 'missing'
+      continue
+    }
     // Otherwise we cannot prove a provider from static data (a core-bundled,
-    // STL, or not-yet-installed header). We do NOT assert "missing"; a build
-    // gives the certain verdict later.
+    // STL, or not-yet-installed header), so a build gives the verdict later.
     dep.state = 'unverified'
   }
 
   const dependencies = [...byHeader.values()].sort((a, b) => a.header.localeCompare(b.header))
+
+  // Compiler-confirmed missing dependencies (certain).
+  for (const d of dependencies.filter((x) => x.state === 'missing')) {
+    findings.push({
+      id: `missing-${d.header}`,
+      severity: 'error',
+      category: 'library',
+      title: `No installed library provides ${d.header}`,
+      detail: `The build reported that ${d.header} could not be found, and no installed library provides it. Install the library that supplies this header.`,
+      header: d.header,
+      file: d.usedAt[0]?.file,
+      line: d.usedAt[0]?.line,
+      suggestion: { kind: 'search-library', target: d.header }
+    })
+  }
+
+  // Hardware-aware checks: a pin driven as an output that the board routes to an
+  // input-only pad. Only emitted when the board's pinout is known with certainty.
+  for (const c of pinConflicts(input.boardMcu, input.pins ?? [])) {
+    findings.push({
+      id: `pin-${c.gpio}-${c.file}-${c.line}`,
+      severity: 'error',
+      category: 'hardware',
+      title: `GPIO${c.gpio} is input-only but driven as an output`,
+      detail: c.reason,
+      file: c.file,
+      line: c.line
+    })
+  }
+
   const unverified = dependencies.filter((d) => d.state === 'unverified')
   if (unverified.length > 0) {
     findings.push({

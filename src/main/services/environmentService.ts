@@ -1,6 +1,6 @@
 import { buildProjectModel } from './projectModelService'
 import { coreInstalled, libInstalled } from './packageService'
-import { status as boardStatus } from './embeddedService'
+import { status as boardStatus, boardMcu } from './embeddedService'
 import { reconcileEnvironment, type EnvInput, type EnvironmentReport } from '../../shared/environment'
 
 /**
@@ -26,13 +26,29 @@ interface PackageSnapshot {
 
 let pkgCache: PackageSnapshot | null = null
 let inflight: Promise<PackageSnapshot> | null = null
+// The MCU for a given fqbn is stable unless its core is reinstalled/updated, so
+// it is cached per fqbn (null = "asked, could not determine" is cached too, to
+// avoid re-spawning the CLI for a board whose core is not installed).
+const mcuCache = new Map<string, string | null>()
 
 /** Drop the cached installed-package snapshot so the next inspect re-reads the
  *  cores/libraries. Wired to packageService: it fires when an install/uninstall/
  *  update-index actually COMPLETES, so the cache is invalidated exactly when the
- *  on-disk package state changed, regardless of which panel started the op. */
+ *  on-disk package state changed, regardless of which panel started the op. A
+ *  core (re)install can change a board's build.mcu, so the MCU cache is dropped
+ *  with it. */
 export function invalidate(): void {
   pkgCache = null
+  mcuCache.clear()
+}
+
+/** The board's MCU, cached per fqbn. */
+async function loadMcu(fqbn: string | null): Promise<string | undefined> {
+  if (!fqbn) return undefined
+  if (mcuCache.has(fqbn)) return mcuCache.get(fqbn) ?? undefined
+  const mcu = await boardMcu(fqbn)
+  mcuCache.set(fqbn, mcu)
+  return mcu ?? undefined
 }
 
 async function loadPackages(refresh: boolean): Promise<PackageSnapshot> {
@@ -68,14 +84,26 @@ async function loadPackages(refresh: boolean): Promise<PackageSnapshot> {
  * confined by the caller), `fqbn` the selected board target. `refresh` forces a
  * re-read of the installed cores/libraries.
  */
-export async function inspect(root: string, fqbn: string | null, refresh = false): Promise<EnvironmentReport | null> {
+export async function inspect(
+  root: string,
+  fqbn: string | null,
+  refresh = false,
+  buildMissingHeaders: string[] = []
+): Promise<EnvironmentReport | null> {
   if (!root) return null
-  const [model, pkgs] = await Promise.all([buildProjectModel(root), loadPackages(refresh)])
+  const [model, pkgs, mcu] = await Promise.all([
+    buildProjectModel(root),
+    loadPackages(refresh),
+    loadMcu(fqbn || null)
+  ])
   const input: EnvInput = {
     fqbn: fqbn || null,
+    boardMcu: mcu,
     installedCores: pkgs.cores,
     installedLibraries: pkgs.libraries,
     usedIncludes: model.libraries.map((u) => ({ header: u.header, file: u.file, line: u.line })),
+    pins: model.pins.map((p) => ({ pin: p.pin, role: p.role, mode: p.mode, file: p.file, line: p.line })),
+    buildMissingHeaders,
     librariesTruncated: model.librariesTruncated,
     arduinoCliAvailable: pkgs.cliAvailable
   }

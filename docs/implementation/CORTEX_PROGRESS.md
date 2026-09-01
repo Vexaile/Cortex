@@ -3,6 +3,52 @@
 Newest first. One entry per completed slice: what shipped, how it was verified,
 and what it unblocks. See `CORTEX_IMPLEMENTATION_PLAN.md` for the full plan.
 
+## Intelligent Dependency & Environment System: the Doctor (Stage 4)
+
+The Environment panel became the Environment Doctor: two evidence-based
+capabilities added to the reconcile engine, both holding the honesty line that a
+strong claim (missing / hardware conflict) must be certain.
+
+1. Build correlation. `extractMissingHeaders` parses the compiler's
+   "X.h: No such file or directory" errors, and the engine upgrades an
+   `unverified` header to `missing` (certain) only when the build reported it
+   not-found, emitting an error finding with a Find-library action. This is the
+   certain verdict the static reconcile deliberately withholds; the store passes
+   the last build's diagnostics through each inspect, and the panel re-inspects
+   when a build finishes, so a failed compile turns "fatal error: Foo.h" into
+   "No installed library provides Foo.h" with the source site.
+2. Hardware-aware checks. A new curated, conservative module
+   (`src/shared/pinCapability.ts`) knows the one board fact it can state with
+   certainty: the classic ESP32 die routes GPIO34-39 to input-only pads. The
+   engine flags a pin driven as an output (digitalWrite / analogWrite / pinMode
+   OUTPUT) on such a pad as a `hardware` finding with the source site, one per
+   pad; it makes no claim on a target whose silicon it does not know. Crucially,
+   the capability is keyed on the actual MCU (`arduino-cli board details`
+   build.mcu, e.g. `esp32`), NOT the board id in the fqbn: several esp32:esp32
+   boards (Arduino Nano ESP32 `nano_nora`, the Heltec `*_V3` family) are built on
+   the ESP32-S3 die but carry ids with no "s3" token, so a name-based heuristic
+   would assert a false input-only claim on them. The gatherer resolves build.mcu
+   per fqbn (cached, dropped on package change) and threads it into the engine.
+
+Findings gained optional file/line so the panel shows click-to-source; the
+Environment panel renders the missing/hardware findings (red) with the honest
+"unverified" explanation surfaced, and a Find-library action for missing headers.
+
+Verified live against the real arduino-cli (esp32:esp32 3.3.11): GPIO34 output
+flagged at its source line; a real-format missing-header diagnostic upgraded a
+header to `missing` with the Find-library action, while an installed library's
+header stayed `resolved`. New unit tests (pinCapability incl. the S3-die
+no-false-claim case, extractMissingHeaders, build-correlation and hardware cases
+in environment.test); typecheck and full suite green.
+
+A 2-dimension adversarial review confirmed three findings, all fixed before
+commit. Stale build diagnostics from a previous board could produce a false
+`missing` after a board switch: `setFqbn`/`setBoardAndPort` now clear diagnostics
+when the target changes. A basename-only missing match could cross-attribute a
+bare `config.h` to a used `vendor/config.h`: the missing match is now full-path
+only. And the pin-capability check's fqbn-name heuristic could not be certain
+(the S3-die boards above): rekeyed on the real MCU as described.
+
 ## Intelligent Dependency & Environment System: the Environment panel (Stage 2)
 
 Made the Stage-1 report real and visible. `arduino-cli lib list` exposes

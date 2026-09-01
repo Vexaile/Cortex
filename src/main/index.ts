@@ -638,8 +638,10 @@ function registerIpc(): void {
   // ---- environment / dependency intelligence ----
   // root drives buildProjectModel (a workspace read), so confine it as the
   // project-model build is. fqbn is a board identifier, not a path.
-  ipcMain.handle(IPC.ENV_INSPECT, (_e, root: string, fqbn: string | null, refresh?: boolean) =>
-    fsService.withinWorkspace(root) ? environment.inspect(root, fqbn, !!refresh) : Promise.resolve(null)
+  ipcMain.handle(IPC.ENV_INSPECT, (_e, root: string, fqbn: string | null, refresh?: boolean, buildMissingHeaders?: string[]) =>
+    fsService.withinWorkspace(root)
+      ? environment.inspect(root, fqbn, !!refresh, Array.isArray(buildMissingHeaders) ? buildMissingHeaders : [])
+      : Promise.resolve(null)
   )
 
   // ---- embedded boards ----

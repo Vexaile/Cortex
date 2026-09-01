@@ -86,8 +86,12 @@ const api = {
   setProjectConfig: (root: string, patch: ProjectConfig): Promise<ProjectConfig> =>
     ipcRenderer.invoke(IPC.PROJECT_CONFIG_SET, root, patch),
   buildProjectModel: (root: string): Promise<ProjectModel | null> => ipcRenderer.invoke(IPC.PROJECT_MODEL_BUILD, root),
-  envInspect: (root: string, fqbn: string | null, refresh?: boolean): Promise<EnvironmentReport | null> =>
-    ipcRenderer.invoke(IPC.ENV_INSPECT, root, fqbn, refresh),
+  envInspect: (
+    root: string,
+    fqbn: string | null,
+    refresh?: boolean,
+    buildMissingHeaders?: string[]
+  ): Promise<EnvironmentReport | null> => ipcRenderer.invoke(IPC.ENV_INSPECT, root, fqbn, refresh, buildMissingHeaders),
 
   // embedded boards
   boardStatus: (): Promise<BoardStatus> => ipcRenderer.invoke(IPC.BOARD_STATUS),

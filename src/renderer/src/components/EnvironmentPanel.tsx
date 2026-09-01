@@ -8,7 +8,8 @@ import {
   CheckCircle2,
   Cpu,
   ArrowUpCircle,
-  Download
+  Download,
+  Search
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import type { DependencyStatus, EnvFinding, FindingSeverity, UpdateStatus } from '@shared/environment'
@@ -115,7 +116,14 @@ export default function EnvironmentPanel(): JSX.Element {
 
   const runSuggestion = (f: EnvFinding): void => {
     const s = f.suggestion
-    if (!s || running) return // call-time guard: runPackageOp drops an op while one is running
+    if (!s) return
+    // A missing header only tells us which header, not the package: send the
+    // engineer to the Library Manager to find one that provides it.
+    if (s.kind === 'search-library') {
+      setSidebar('libraries')
+      return
+    }
+    if (running) return // call-time guard: runPackageOp drops an op while one is running
     if (s.kind === 'install-core') void installCore(s.target)
     else void installLib(s.target, s.version)
   }
@@ -171,6 +179,7 @@ export default function EnvironmentPanel(): JSX.Element {
               .filter((f) => f.category !== 'update')
               .map((f) => {
                 const Icon = SEV_ICON[f.severity]
+                const search = f.suggestion?.kind === 'search-library'
                 return (
                   <div key={f.id} className="px-3 py-1 pl-4">
                     <div className="row items-start gap-2">
@@ -178,15 +187,20 @@ export default function EnvironmentPanel(): JSX.Element {
                       <div className="min-w-0 flex-1">
                         <div className="text-ide-text">{f.title}</div>
                         <div className="text-[11px] leading-snug text-ide-muted">{f.detail}</div>
+                        {f.file && f.line != null && (
+                          <div className="pt-0.5">
+                            <SiteLink file={f.file} line={f.line} />
+                          </div>
+                        )}
                       </div>
-                      {f.suggestion?.kind === 'install-core' && (
+                      {f.suggestion && (
                         <button
                           className="btn shrink-0 whitespace-nowrap border border-ide-border text-[11px] disabled:opacity-40"
                           onClick={() => runSuggestion(f)}
-                          disabled={running}
-                          title={`Install ${f.suggestion.target}`}
+                          disabled={running && !search}
+                          title={search ? 'Find a library in the Library Manager' : `Install ${f.suggestion.target}`}
                         >
-                          <Download size={12} /> Install
+                          {search ? <Search size={12} /> : <Download size={12} />} {search ? 'Find library' : 'Install'}
                         </button>
                       )}
                     </div>
