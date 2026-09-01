@@ -21,6 +21,7 @@ import type {
 import { langFromPath, isHeaderPath, cDriver, cppDriver, type LanguageDef } from '@shared/languages'
 import { normalizeEol, detectEol, withEol } from '@shared/diff'
 import { extractMissingHeaders, type EnvironmentReport } from '@shared/environment'
+import type { LockCheck } from '@shared/lockfile'
 import type { LspAvailability } from '@shared/lsp'
 import type { DebugState, DebugOutput } from '@shared/ipc'
 
@@ -178,6 +179,12 @@ export function workspaceScopedReset(): Record<string, unknown> {
     selectedFqbn: '',
     // Derived from the old project's includes + board; re-inspected on demand.
     environmentReport: null,
+    envLoading: false,
+    // The lock belongs to the old project's .cortex; re-read on demand. lockBusy
+    // is cleared too, so a snapshot in flight during a switch cannot leave the
+    // new project's Snapshot button stuck disabled/"Saving...".
+    lockCheck: null,
+    lockBusy: false,
     // The agent transcript, staged edits, and conversation all reference the old
     // project's files, so a switch must not carry them (and any in-flight run's
     // events are dropped once agentRunId is cleared).
@@ -330,6 +337,8 @@ const nextRunId = (): string => `run-${++runCounter}`
 // Latest-wins guard for environment inspects: a slow earlier inspect must not
 // clobber the report of a newer one (e.g. after a board change).
 let envInspectSeq = 0
+// Same guard for lock checks, which also re-run on a board change.
+let lockCheckSeq = 0
 /** Set when an upload closed the serial monitor, so we can reopen it after. */
 let reopenSerialAfterUpload = false
 
@@ -446,6 +455,10 @@ interface State {
   boardStatus: BoardStatus | null
   environmentReport: EnvironmentReport | null
   envLoading: boolean
+  /** The stored environment lock paired with its drift, or null when there is
+   *  no lock (reproducibility: see @shared/lockfile). */
+  lockCheck: LockCheck | null
+  lockBusy: boolean
   boards: BoardPort[]
   boardTargets: BoardTarget[]
   selectedFqbn: string
@@ -577,6 +590,10 @@ interface State {
   // embedded boards
   refreshBoardStatus: () => Promise<void>
   inspectEnvironment: (refresh?: boolean) => Promise<void>
+  /** Load the stored lock and its drift against the current environment. */
+  checkLock: () => Promise<void>
+  /** Snapshot the current installed environment to the lockfile, then re-check. */
+  snapshotEnvironment: () => Promise<void>
   refreshBoards: () => Promise<void>
   refreshBoardTargets: () => Promise<void>
   setFqbn: (fqbn: string) => void
@@ -769,6 +786,8 @@ export const useStore = create<State>((set, get) => ({
   boardTargets: [],
   environmentReport: null,
   envLoading: false,
+  lockCheck: null,
+  lockBusy: false,
   selectedFqbn: '',
 
   ports: [],
@@ -1864,6 +1883,37 @@ export const useStore = create<State>((set, get) => ({
       if (seq === envInspectSeq) set({ envLoading: false })
     }
   },
+
+  async checkLock() {
+    const root = get().workspaceRoot
+    if (!root) {
+      set({ lockCheck: null })
+      return
+    }
+    const seq = ++lockCheckSeq
+    try {
+      const lockCheck = await window.api.envLockCheck(root, get().selectedFqbn || null)
+      if (seq === lockCheckSeq) set({ lockCheck })
+    } catch {
+      if (seq === lockCheckSeq) set({ lockCheck: null })
+    }
+  },
+
+  async snapshotEnvironment() {
+    const root = get().workspaceRoot
+    if (!root || get().lockBusy) return
+    set({ lockBusy: true })
+    try {
+      await window.api.envLockWrite(root, get().selectedFqbn || null)
+      // Re-check so the panel reflects the just-written lock (now in sync).
+      await get().checkLock()
+    } catch {
+      // A failed write leaves the previous lock state untouched.
+    } finally {
+      set({ lockBusy: false })
+    }
+  },
+
   async refreshBoards() {
     const boards = await window.api.boardListConnected()
     set({ boards })

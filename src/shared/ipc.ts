@@ -43,6 +43,10 @@ export const IPC = {
   // uses against what is installed + the selected board into an evidence-based
   // report (invoke -> EnvironmentReport | null).
   ENV_INSPECT: 'env:inspect',
+  // Reproducibility: snapshot the installed environment to a lockfile, and check
+  // the current environment against the stored lock for drift.
+  ENV_LOCK_WRITE: 'env:lockWrite',
+  ENV_LOCK_CHECK: 'env:lockCheck',
 
   // Embedded boards (arduino-cli / PlatformIO): ESP32, RP2040, AVR/Arduino, ...
   BOARD_STATUS: 'board:status', // is arduino-cli available?

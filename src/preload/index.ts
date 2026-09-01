@@ -38,6 +38,7 @@ import type {
 } from '../shared/ipc'
 import type { LspCall, LspAvailability, LspDiagnosticsPush, LspServerExit, LspBusy } from '../shared/lsp'
 import type { EnvironmentReport } from '../shared/environment'
+import type { CortexLock, LockCheck } from '../shared/lockfile'
 
 type Unsub = () => void
 
@@ -92,6 +93,10 @@ const api = {
     refresh?: boolean,
     buildMissingHeaders?: string[]
   ): Promise<EnvironmentReport | null> => ipcRenderer.invoke(IPC.ENV_INSPECT, root, fqbn, refresh, buildMissingHeaders),
+  envLockWrite: (root: string, fqbn: string | null): Promise<CortexLock | null> =>
+    ipcRenderer.invoke(IPC.ENV_LOCK_WRITE, root, fqbn),
+  envLockCheck: (root: string, fqbn: string | null): Promise<LockCheck | null> =>
+    ipcRenderer.invoke(IPC.ENV_LOCK_CHECK, root, fqbn),
 
   // embedded boards
   boardStatus: (): Promise<BoardStatus> => ipcRenderer.invoke(IPC.BOARD_STATUS),

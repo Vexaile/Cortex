@@ -112,8 +112,12 @@ export async function listAll(): Promise<BoardTarget[]> {
 export async function boardMcu(fqbn: string): Promise<string | null> {
   if (!fqbn) return null
   try {
+    // board details is genuinely slow (it loads every build property of the
+    // core, ~8s for esp32), and it may run alongside the package-snapshot reads,
+    // so the timeout is generous - a tight one returns null under contention and
+    // suppresses an otherwise-certain MCU fact.
     const { stdout } = await execFileAsync(CLI, ['board', 'details', '--fqbn', fqbn, '--format', 'json'], {
-      timeout: 12000,
+      timeout: 25000,
       windowsHide: true
     })
     const parsed = JSON.parse(stdout.toString() || '{}')

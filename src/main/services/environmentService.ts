@@ -27,28 +27,68 @@ interface PackageSnapshot {
 let pkgCache: PackageSnapshot | null = null
 let inflight: Promise<PackageSnapshot> | null = null
 // The MCU for a given fqbn is stable unless its core is reinstalled/updated, so
-// it is cached per fqbn (null = "asked, could not determine" is cached too, to
-// avoid re-spawning the CLI for a board whose core is not installed).
-const mcuCache = new Map<string, string | null>()
+// a SUCCESSFUL resolution is cached per fqbn. A failure (transient timeout under
+// CLI contention, or a not-yet-installed core) is deliberately NOT cached, so it
+// is retried on the next inspect rather than being suppressed permanently.
+const mcuCache = new Map<string, string>()
+// Coalesce concurrent resolutions of the same fqbn: a panel mount fires inspect
+// and checkLock together, each wanting the MCU, and board details is an ~8s CLI
+// call - without this they race two of them.
+const mcuInflight = new Map<string, Promise<string | undefined>>()
+// Bumped on every invalidate(). An MCU resolution captures the generation it
+// started under and refuses to write its result if the generation has since
+// changed, so a board-details call still in flight when a core (re)install
+// completes cannot repopulate the just-cleared cache with a pre-change value.
+let mcuGen = 0
 
 /** Drop the cached installed-package snapshot so the next inspect re-reads the
  *  cores/libraries. Wired to packageService: it fires when an install/uninstall/
  *  update-index actually COMPLETES, so the cache is invalidated exactly when the
  *  on-disk package state changed, regardless of which panel started the op. A
  *  core (re)install can change a board's build.mcu, so the MCU cache is dropped
- *  with it. */
+ *  with it (and an in-flight resolve is fenced off by the generation bump). */
 export function invalidate(): void {
   pkgCache = null
   mcuCache.clear()
+  mcuGen++
 }
 
-/** The board's MCU, cached per fqbn. */
-async function loadMcu(fqbn: string | null): Promise<string | undefined> {
-  if (!fqbn) return undefined
-  if (mcuCache.has(fqbn)) return mcuCache.get(fqbn) ?? undefined
-  const mcu = await boardMcu(fqbn)
-  mcuCache.set(fqbn, mcu)
-  return mcu ?? undefined
+/** The board's MCU, cached per fqbn (successes only), single-flighted. `refresh`
+ *  drops the cached value so a manual re-scan re-reads build.mcu from the CLI -
+ *  a core changed OUTSIDE Cortex fires no invalidate, so without this a re-scan
+ *  would reuse a stale MCU (the documented silicon ground truth). */
+function loadMcu(fqbn: string | null, refresh = false): Promise<string | undefined> {
+  if (!fqbn) return Promise.resolve(undefined)
+  if (refresh) mcuCache.delete(fqbn)
+  const cached = mcuCache.get(fqbn)
+  if (cached !== undefined) return Promise.resolve(cached)
+  const existing = mcuInflight.get(fqbn)
+  if (existing) return existing
+  const gen = mcuGen
+  const p = (async () => {
+    try {
+      const mcu = await boardMcu(fqbn)
+      if (mcu && gen === mcuGen) mcuCache.set(fqbn, mcu)
+      return mcu ?? undefined
+    } finally {
+      mcuInflight.delete(fqbn)
+    }
+  })()
+  mcuInflight.set(fqbn, p)
+  return p
+}
+
+/** The current installed cores/libraries + CLI availability, from the shared
+ *  single-flight cache. Exposed so the lockfile service reads the SAME snapshot
+ *  the inspect path does, rather than storming arduino-cli with its own reads. */
+export function installedSnapshot(refresh = false): Promise<PackageSnapshot> {
+  return loadPackages(refresh)
+}
+
+/** The board's MCU for an fqbn, from the shared per-fqbn cache. `refresh` forces
+ *  a re-read (used when snapshotting a lock, which must reflect disk). */
+export function boardMcuCached(fqbn: string | null, refresh = false): Promise<string | undefined> {
+  return loadMcu(fqbn, refresh)
 }
 
 async function loadPackages(refresh: boolean): Promise<PackageSnapshot> {
@@ -94,7 +134,7 @@ export async function inspect(
   const [model, pkgs, mcu] = await Promise.all([
     buildProjectModel(root),
     loadPackages(refresh),
-    loadMcu(fqbn || null)
+    loadMcu(fqbn || null, refresh)
   ])
   const input: EnvInput = {
     fqbn: fqbn || null,

@@ -25,6 +25,7 @@ import type { AiRequest } from './services/aiService'
 import * as projectConfig from './services/projectConfigService'
 import * as projectModel from './services/projectModelService'
 import * as environment from './services/environmentService'
+import * as lockfile from './services/lockfileService'
 import * as embedded from './services/embeddedService'
 import * as pkg from './services/packageService'
 import * as debug from './services/debugService'
@@ -642,6 +643,14 @@ function registerIpc(): void {
     fsService.withinWorkspace(root)
       ? environment.inspect(root, fqbn, !!refresh, Array.isArray(buildMissingHeaders) ? buildMissingHeaders : [])
       : Promise.resolve(null)
+  )
+  // Writing the lock touches <workspace>/.cortex, so confine root like the config
+  // writer. The lock records only observed data (no command is spawned from it).
+  ipcMain.handle(IPC.ENV_LOCK_WRITE, (_e, root: string, fqbn: string | null) =>
+    fsService.withinWorkspace(root) ? lockfile.write(root, fqbn, new Date().toISOString()) : Promise.resolve(null)
+  )
+  ipcMain.handle(IPC.ENV_LOCK_CHECK, (_e, root: string, fqbn: string | null) =>
+    fsService.withinWorkspace(root) ? lockfile.check(root, fqbn) : Promise.resolve(null)
   )
 
   // ---- embedded boards ----

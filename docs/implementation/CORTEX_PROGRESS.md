@@ -3,6 +3,55 @@
 Newest first. One entry per completed slice: what shipped, how it was verified,
 and what it unblocks. See `CORTEX_IMPLEMENTATION_PLAN.md` for the full plan.
 
+## Intelligent Dependency & Environment System: reproducibility (Stage 5)
+
+Gave the environment a lockfile, so it can be reproduced and its drift made
+visible. A new pure module (`src/shared/lockfile.ts`) models the lock as an
+OBSERVED snapshot - the exact installed cores and libraries (with versions) plus
+the board target and MCU - and computes drift between a stored lock and the
+current environment. It is deterministic (sorts and dedups so the same
+environment always serializes to the same bytes and the file diffs cleanly in
+git), clock-free (the gatherer stamps the timestamp), and holds the honesty
+line: everything reported is an observed difference, never a compatibility
+judgement. `parseLock` validates the untrusted on-disk file (a cloned repo can
+ship one) and returns null on any malformed shape.
+
+A thin main-process service (`lockfileService.ts`) owns the file I/O at
+`<workspace>/.cortex/cortex.lock.json` and reuses environmentService's shared
+single-flight cache for the installed packages and the board MCU, so a snapshot
+or check never storms arduino-cli with its own reads. Two workspace-confined IPC
+channels (`ENV_LOCK_WRITE`, `ENV_LOCK_CHECK`) expose it. The Environment panel
+gained a Reproducibility section: a compact status line (in sync / N changes
+since the snapshot, with the snapshot time) and a Snapshot action, expanding to
+the concrete differences (board change, missing/changed cores and libraries)
+only when the environment has drifted; extras are shown as info, not as
+breaking. A completed package op re-checks the drift in lockstep with the
+re-inspect, so installing a locked-but-missing library brings the panel back
+into sync on its own.
+
+While wiring the MCU into the lock, two real robustness bugs in the Stage-4 MCU
+resolver surfaced and were fixed: `arduino-cli board details` is a genuinely
+slow (~8s) call, and under contention with the package-snapshot reads it blew
+the 12s timeout and returned null; worse, that null was cached, so a transient
+timeout suppressed an otherwise-certain MCU fact permanently. The timeout is now
+25s, only SUCCESSFUL resolutions are cached (a failure is retried next inspect),
+and the lookup is single-flighted per fqbn so a panel mount's concurrent inspect
+and lock-check share one board-details call instead of racing two.
+
+Verified live end to end against the real arduino-cli 1.5.1 (esp32:esp32 3.3.11;
+three installed cores and three libraries): a snapshot wrote a lockfile
+capturing all three cores, all three libraries, the fqbn, `build.mcu` = esp32,
+and a timestamp; a check immediately after reported in sync; hand-editing the
+lock to a different ESP32Servo version made the check report exactly one
+library-changed drift (locked 3.0.0 vs installed 3.2.1) and the panel rendered
+"1 change since the snapshot" with the changed row. 15 new unit tests
+(lockfile: build determinism, untrusted-shape rejection, and the diff cases),
+plus lockCheck added to the workspace-reset guard. Typecheck (node+web) and full
+suite green (691 passed). Reviewed adversarially before commit.
+
+This unblocks Stage 6 (restore-from-lock, which installs the locked versions
+through the existing gated, streamed package path).
+
 ## Intelligent Dependency & Environment System: the Doctor (Stage 4)
 
 The Environment panel became the Environment Doctor: two evidence-based

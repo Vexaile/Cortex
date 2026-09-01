@@ -9,7 +9,9 @@ import {
   Cpu,
   ArrowUpCircle,
   Download,
-  Search
+  Search,
+  Camera,
+  Lock
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import type { DependencyStatus, EnvFinding, FindingSeverity, UpdateStatus } from '@shared/environment'
@@ -87,10 +89,124 @@ const RISK_CLS: Record<UpdateStatus['risk'], string> = {
   unknown: 'bg-ide-bar text-ide-faint'
 }
 
+/**
+ * Reproducibility: the observed lockfile and its drift. A compact status line
+ * (in sync / N changes / no snapshot) with a Snapshot action, expanding to the
+ * concrete differences only when the environment has drifted. Everything shown
+ * is an observed fact from @shared/lockfile; no compatibility is judged.
+ */
+function Reproducibility(): JSX.Element {
+  const lockCheck = useStore((s) => s.lockCheck)
+  const lockBusy = useStore((s) => s.lockBusy)
+  const snapshot = useStore((s) => s.snapshotEnvironment)
+
+  const drift = lockCheck?.drift
+  const has = !!lockCheck
+  const inSync = drift?.inSync ?? false
+  const when = lockCheck?.lock.generatedAt
+
+  let StatusIcon = Camera
+  let statusCls = 'text-ide-faint'
+  let statusText = 'No environment snapshot'
+  if (has && inSync) {
+    StatusIcon = CheckCircle2
+    statusCls = 'text-ide-moss'
+    statusText = 'In sync with the lockfile'
+  } else if (has && drift) {
+    StatusIcon = AlertTriangle
+    statusCls = 'text-ide-amber'
+    const n = drift.breakingCount
+    statusText = `${n} change${n === 1 ? '' : 's'} since the snapshot`
+  }
+
+  return (
+    <div className="border-t border-ide-border/60 pt-1">
+      <div className="row items-center gap-1.5 px-3 py-1 text-[11px] font-medium uppercase tracking-wider text-ide-muted">
+        <Lock size={11} /> Reproducibility
+      </div>
+      <div className="row items-start gap-2 px-3 py-1 pl-4">
+        <StatusIcon size={13} className={`mt-0.5 shrink-0 ${statusCls}`} />
+        <div className="min-w-0 flex-1">
+          <div className="text-ide-text">{statusText}</div>
+          {when && (
+            <div className="text-[10px] text-ide-faint" title={when}>
+              snapshot {new Date(when).toLocaleString()}
+            </div>
+          )}
+        </div>
+        <button
+          className="btn shrink-0 whitespace-nowrap border border-ide-border text-[11px] disabled:opacity-40"
+          onClick={() => void snapshot()}
+          disabled={lockBusy}
+          title={has ? 'Overwrite the lockfile with the current environment' : 'Record the current environment to a lockfile'}
+        >
+          <Camera size={12} /> {lockBusy ? 'Saving...' : has ? 'Re-snapshot' : 'Snapshot'}
+        </button>
+      </div>
+
+      {has && drift && !inSync && (
+        <div className="pb-1">
+          {drift.boardChanged && (
+            <DriftRow badge={{ label: 'board', cls: 'bg-ide-amber/15 text-ide-amber' }}>
+              <span className="mono text-[11px]">
+                {drift.boardChanged.from || 'none'} {'->'} {drift.boardChanged.to || 'none'}
+              </span>
+            </DriftRow>
+          )}
+          {drift.coresMissing.map((c) => (
+            <DriftRow key={`cm-${c.id}`} badge={{ label: 'missing', cls: 'bg-ide-red/15 text-ide-red' }}>
+              <span className="mono truncate">{c.id}</span>
+              <span className="text-[11px] text-ide-muted">core, locked {c.version}</span>
+            </DriftRow>
+          ))}
+          {drift.librariesMissing.map((l) => (
+            <DriftRow key={`lm-${l.name}`} badge={{ label: 'missing', cls: 'bg-ide-red/15 text-ide-red' }}>
+              <span className="truncate">{l.name}</span>
+              <span className="text-[11px] text-ide-muted">locked {l.version}</span>
+            </DriftRow>
+          ))}
+          {drift.coresChanged.map((c) => (
+            <DriftRow key={`cc-${c.id}`} badge={{ label: 'changed', cls: 'bg-ide-amber/15 text-ide-amber' }}>
+              <span className="mono truncate">{c.id}</span>
+              <span className="text-[11px] text-ide-muted">
+                {c.installed} (locked {c.locked})
+              </span>
+            </DriftRow>
+          ))}
+          {drift.librariesChanged.map((l) => (
+            <DriftRow key={`lc-${l.name}`} badge={{ label: 'changed', cls: 'bg-ide-amber/15 text-ide-amber' }}>
+              <span className="truncate">{l.name}</span>
+              <span className="text-[11px] text-ide-muted">
+                {l.installed} (locked {l.locked})
+              </span>
+            </DriftRow>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function DriftRow({
+  badge,
+  children
+}: {
+  badge: { label: string; cls: string }
+  children: React.ReactNode
+}): JSX.Element {
+  return (
+    <div className="row items-center gap-2 px-3 py-0.5 pl-4">
+      <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] ${badge.cls}`}>{badge.label}</span>
+      {children}
+    </div>
+  )
+}
+
 export default function EnvironmentPanel(): JSX.Element {
   const report = useStore((s) => s.environmentReport)
   const envLoading = useStore((s) => s.envLoading)
   const inspectEnvironment = useStore((s) => s.inspectEnvironment)
+  const checkLock = useStore((s) => s.checkLock)
   const workspaceRoot = useStore((s) => s.workspaceRoot)
   const selectedFqbn = useStore((s) => s.selectedFqbn)
   const running = useStore((s) => s.running)
@@ -99,20 +215,28 @@ export default function EnvironmentPanel(): JSX.Element {
   const setSidebar = useStore((s) => s.setSidebar)
 
   // Inspect on open and whenever the project or board changes (uses the cached
-  // package snapshot; the Refresh button forces a re-read).
+  // package snapshot; the Refresh button forces a re-read). The lock drift is
+  // checked against the same board/package state, so re-check it in lockstep.
   useEffect(() => {
-    if (workspaceRoot) void inspectEnvironment(false)
-  }, [workspaceRoot, selectedFqbn, inspectEnvironment])
+    if (workspaceRoot) {
+      void inspectEnvironment(false)
+      void checkLock()
+    }
+  }, [workspaceRoot, selectedFqbn, inspectEnvironment, checkLock])
 
   // A completed package op invalidates the environment cache in the main
   // process, so re-inspect whenever any op finishes (running true -> false),
   // regardless of which panel started it. After a non-package run the cache is
-  // warm, so this is a cheap model-only refresh.
+  // warm, so this is a cheap model-only refresh. A package op can also change
+  // the drift (installing a locked-but-missing library brings it into sync).
   const prevRunning = useRef(running)
   useEffect(() => {
-    if (prevRunning.current && !running) void inspectEnvironment(false)
+    if (prevRunning.current && !running) {
+      void inspectEnvironment(false)
+      void checkLock()
+    }
     prevRunning.current = running
-  }, [running, inspectEnvironment])
+  }, [running, inspectEnvironment, checkLock])
 
   const runSuggestion = (f: EnvFinding): void => {
     const s = f.suggestion
@@ -135,7 +259,10 @@ export default function EnvironmentPanel(): JSX.Element {
         actions={
           <button
             title="Re-scan environment"
-            onClick={() => void inspectEnvironment(true)}
+            onClick={() => {
+              void inspectEnvironment(true)
+              void checkLock()
+            }}
             className="rounded p-1 hover:bg-ide-hover hover:text-ide-text"
           >
             <RefreshCw size={13} className={envLoading ? 'animate-spin' : ''} />
@@ -171,6 +298,9 @@ export default function EnvironmentPanel(): JSX.Element {
               </span>
             )}
           </div>
+
+          {/* Reproducibility: the lockfile and any drift since it was taken. */}
+          <Reproducibility />
 
           {/* Diagnostics: core/board status + the library-level explanation
               (why headers are unverified). Updates get their own section. */}
