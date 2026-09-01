@@ -1,51 +1,16 @@
-import { Play, Square, CheckCircle2, UploadCloud, ChevronDown, AlertTriangle, Radio, LineChart, Bug } from 'lucide-react'
+import { Play, Square, CheckCircle2, UploadCloud, AlertTriangle, Radio, LineChart, Bug } from 'lucide-react'
 import { useStore, isSketch } from '../store/useStore'
-import { isHeaderPath, cDriver, cppDriver } from '@shared/languages'
-import { isHostCpp } from '@shared/security'
-import type { CppStandard, CStandard } from '@shared/ipc'
+import { isHeaderPath } from '@shared/languages'
 import BoardPortSelect from './BoardPortSelect'
-
-const STANDARDS: CppStandard[] = ['c++11', 'c++14', 'c++17', 'c++20', 'c++23', 'c++2c']
-const C_STANDARDS: CStandard[] = ['c99', 'c11', 'c17', 'c23']
-
-// appearance-none is load-bearing: without it these render as native Windows combo
-// boxes (native chevron, native font, taller box) right next to the primary Run
-// button, which instantly reads as "not a real app".
-const SELECT_CLASS =
-  'h-6 w-full appearance-none rounded border border-ide-border bg-ide-bar pl-2 pr-6 text-[11px] text-ide-text outline-none transition-colors hover:border-ide-faint focus:border-ide-accent'
-
-function Select({
-  value,
-  onChange,
-  title,
-  children
-}: {
-  value: string
-  onChange: (v: string) => void
-  title: string
-  children: React.ReactNode
-}): JSX.Element {
-  return (
-    <div className="relative shrink-0">
-      <select className={SELECT_CLASS} value={value} onChange={(e) => onChange(e.target.value)} title={title}>
-        {children}
-      </select>
-      <ChevronDown size={11} className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-ide-faint" />
-    </div>
-  )
-}
-// Every level the validator accepts, so a value already persisted in a
-// project's config always matches an option instead of rendering blank.
-const OPT_LEVELS = ['-O0', '-O1', '-O2', '-O3', '-Os', '-Ofast', '-Og', '-O']
-const RUST_EDITIONS = ['2015', '2018', '2021', '2024']
+import TargetSelect from './TargetSelect'
 
 /**
- * The run/build toolbar: build settings for the active file, the primary
- * action buttons (Run / Stop, or the Arduino Verify / Upload / Debug trio),
- * the Board + Port selector, and Serial Monitor / Plotter. It lives on its own
- * row below the title bar so build configuration is no longer crammed into the
- * window chrome. Build config here is per-project (ProjectConfig); a following
- * slice folds it into a Target/Environment popover.
+ * The run/build toolbar: the build Target selector for the active file, the
+ * primary action buttons (Run / Stop, or the Arduino Verify / Upload / Debug
+ * trio), the Board + Port selector, and Serial Monitor / Plotter. It lives on
+ * its own row below the title bar so build configuration is no longer crammed
+ * into the window chrome. Build config is per-project (ProjectConfig) and lives
+ * behind the Target selector (components/TargetSelect.tsx).
  */
 export default function Toolbar(): JSX.Element {
   const {
@@ -54,17 +19,6 @@ export default function Toolbar(): JSX.Element {
     running,
     runActive,
     stopRun,
-    compiler,
-    setCompiler,
-    std,
-    setStd,
-    optimization,
-    setOptimization,
-    cStd,
-    setCStd,
-    rustEdition,
-    setRustEdition,
-    toolchains,
     boardStatus,
     selectedFqbn,
     verifyBoard,
@@ -100,94 +54,14 @@ export default function Toolbar(): JSX.Element {
     : canRun
       ? 'Run (F5)'
       : `Cortex cannot run ${activeTab?.language.label ?? 'this'} files`
-  // The stored `compiler` is always the C++ driver, so the options are C++
-  // drivers too - but only ones that were actually PROBED and are host
-  // compilers. Mapping an available `gcc` up to `g++` manufactured an option
-  // for a compiler that may not exist (the gcc package without g++ is a normal
-  // Linux install), and running it produced "spawn g++ ENOENT" for something
-  // the IDE had just listed. isHostCpp also keeps avr-g++/arm-none-eabi-g++
-  // out: they build firmware, not something this machine can run or debug.
-  const cppCompilers = Array.from(
-    new Set(toolchains.filter((t) => t.available && isHostCpp(t.command)).map((t) => t.command))
-  )
 
   return (
     <div className="flex h-10 shrink-0 items-center gap-2 border-b border-ide-border bg-ide-bar px-2 text-[12px]">
-      {/* Host C/C++ build options */}
-      {isNative && (
-        <div className="flex shrink-0 items-center gap-1.5 text-[11px]">
-          {/* Show the driver that will ACTUALLY run. A .c file is built by the
-              C counterpart, so displaying "g++" while invoking gcc was a lie. */}
-          <Select
-            value={isC ? cDriver(compiler) : compiler}
-            onChange={(v) => setCompiler(isC ? cppDriver(v) : v)}
-            title={isC ? 'C compiler' : 'C++ compiler'}
-          >
-            {/* Must go through the same mapping as the value above, or the
-                controlled select matches no option and renders blank for a .c
-                file (value 'gcc' vs a lone option 'g++'). */}
-            {cppCompilers.length === 0 && (
-              <option value={isC ? cDriver(compiler) : compiler}>{isC ? cDriver(compiler) : compiler}</option>
-            )}
-            {cppCompilers.map((c) => {
-              const shown = isC ? cDriver(c) : c
-              return (
-                <option key={c} value={shown}>
-                  {shown}
-                </option>
-              )
-            })}
-          </Select>
-          {/* A .c file gets C standards. Offering c++23 there was not just
-              cosmetic: gcc rejects `-std=c++23` for C outright. */}
-          {isC ? (
-            <Select value={cStd} onChange={(v) => setCStd(v as CStandard)} title="C standard">
-              {C_STANDARDS.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </Select>
-          ) : (
-            <Select value={std} onChange={(v) => setStd(v as CppStandard)} title="C++ standard">
-              {STANDARDS.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </Select>
-          )}
-          <Select value={optimization} onChange={setOptimization} title="Optimization level">
-            {OPT_LEVELS.map((o) => (
-              <option key={o} value={o}>
-                {o}
-              </option>
-            ))}
-          </Select>
-        </div>
-      )}
-
-      {/* Rust build options. Rust was runnable but had no build settings at all,
-          so the edition was hardcoded and unreachable from the UI. */}
-      {isRust && (
-        <div className="flex shrink-0 items-center gap-1.5 text-[11px]">
-          <Select value={rustEdition} onChange={setRustEdition} title="Rust edition">
-            {RUST_EDITIONS.map((e) => (
-              <option key={e} value={e}>
-                edition {e}
-              </option>
-            ))}
-          </Select>
-          {/* One `optimization` field is shared with the C/C++ toolbar, so this
-              must write a value that select also offers: a bare '-O' left the
-              C++ dropdown matching no option (rendering blank) and, once the
-              level was validated, downgraded C++ builds to -O0. */}
-          <Select value={optimization === '-O0' ? '-O0' : '-O2'} onChange={setOptimization} title="Build profile">
-            <option value="-O0">debug</option>
-            <option value="-O2">release</option>
-          </Select>
-        </div>
-      )}
+      {/* Build target: compiler / standard / optimization for host C/C++, or
+          edition / profile for Rust. Sketches target a board, chosen via the
+          Board + Port control further right. */}
+      {isNative && <TargetSelect kind={isC ? 'c' : 'cpp'} />}
+      {isRust && <TargetSelect kind="rust" />}
 
       <div className="flex-1" />
 
