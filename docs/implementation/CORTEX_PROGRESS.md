@@ -3,6 +3,37 @@
 Newest first. One entry per completed slice: what shipped, how it was verified,
 and what it unblocks. See `CORTEX_IMPLEMENTATION_PLAN.md` for the full plan.
 
+## Environment-aware agent tools (Stage 8)
+
+Gave the engineering agent the hardware-aware context that the whole dependency/
+graph system exists to produce. Two new READ-ONLY agent tools (SAFE tier,
+auto-run, workspace-confined, no arguments): `get_environment` returns the
+evidence-based environment report (is the board core installed; each #include
+resolved via a named library / provided by the toolchain / unverified / MISSING;
+updates with risk; hardware findings), and `get_hardware_graph` returns the
+device/bus/pin relationship graph with its inferred, hedged bus attachments. The
+system prompt now tells the agent to consult them and to trust what they report
+rather than assume a library or device is present.
+
+The formatters are pure and unit-tested (`src/shared/agentContext.ts`) so the
+exact bytes the model sees are pinned down and, crucially, honest: an unverified
+dependency is never rendered as present, and a "likely on <bus>" inference keeps
+its qualifier and note - the agent can tell what Cortex knows from what it
+guesses. The executors (in agentService) reuse the already-verified primitives -
+environmentService.inspect for the report (board from the persisted project
+config), buildProjectModel + buildHardwareGraph for the graph - and add no new
+path-handling or mutation surface. The structured fallback (non-tool providers)
+now includes the same environment + graph context up front.
+
+Verified: node+web typecheck clean; full suite green (717 passed), including new
+tests that the tools are registered as read-only no-arg tools (not in
+MUTATION_TOOLS) and that the formatters preserve the honesty of unverified deps
+and hedged bus inferences. The app boots with the new agentService (no import
+cycle from the added environmentService dependency). The end-to-end LLM tool-call
+was not exercised here (no AI provider key is configured in this environment),
+but the executors are thin wrappers over primitives proven live in Stages 4-7 and
+the tool contract/formatters are unit-tested.
+
 ## Firmware <-> simulator consistency (Stage 7)
 
 Closed the audit's core gap: the source-derived hardware graph and the simulator

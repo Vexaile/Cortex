@@ -7,6 +7,10 @@ import { getSettings } from './settingsService'
 import * as fsService from './fsService'
 import { searchInFiles } from './searchService'
 import { buildProjectModel } from './projectModelService'
+import * as environment from './environmentService'
+import { getProjectConfig } from './projectConfigService'
+import { buildHardwareGraph } from '../../shared/hardwareGraph'
+import { formatEnvironmentReport, formatHardwareGraph } from '../../shared/agentContext'
 import {
   AGENT_TOOLS,
   AGENT_SYSTEM_PROMPT,
@@ -15,6 +19,8 @@ import {
   SEARCH_PROJECT,
   GET_DIAGNOSTICS,
   GET_PROJECT_MODEL,
+  GET_ENVIRONMENT,
+  GET_HARDWARE_GRAPH,
   PROPOSE_EDIT,
   toAnthropicTools,
   toOpenAiTools,
@@ -204,6 +210,20 @@ async function execTool(
     if (name === GET_PROJECT_MODEL) {
       const pm = await buildProjectModel(root)
       return ok(clip(formatProjectModel(pm)))
+    }
+
+    if (name === GET_ENVIRONMENT) {
+      // The board comes from the persisted project config (the selected target),
+      // so the agent reasons about the same environment the panels show.
+      const cfg = await getProjectConfig(root)
+      const report = await environment.inspect(root, cfg.boardFqbn ?? null, false)
+      if (!report) return err('Error: could not build the environment report.')
+      return ok(clip(formatEnvironmentReport(report)))
+    }
+
+    if (name === GET_HARDWARE_GRAPH) {
+      const pm = await buildProjectModel(root)
+      return ok(clip(formatHardwareGraph(buildHardwareGraph(pm))))
     }
 
     if (name === PROPOSE_EDIT) {
@@ -402,9 +422,18 @@ async function structuredFallback(
   // front: project model, diagnostics, and the active file.
   const ctx: string[] = []
   try {
-    ctx.push('PROJECT MODEL:\n' + formatProjectModel(await buildProjectModel(root)))
+    const pm = await buildProjectModel(root)
+    ctx.push('PROJECT MODEL:\n' + formatProjectModel(pm))
+    ctx.push('HARDWARE GRAPH:\n' + formatHardwareGraph(buildHardwareGraph(pm)))
   } catch {
     /* no model */
+  }
+  try {
+    const cfg = await getProjectConfig(root)
+    const report = await environment.inspect(root, cfg.boardFqbn ?? null, false)
+    if (report) ctx.push('ENVIRONMENT:\n' + formatEnvironmentReport(report))
+  } catch {
+    /* no environment */
   }
   ctx.push('DIAGNOSTICS:\n' + formatDiagnostics(root, req.diagnostics))
   if (req.activePath) {

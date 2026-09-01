@@ -6,8 +6,9 @@
  * boundary (workspace confinement, human approval for edits).
  *
  * Trust tiers (see CLAUDE.md sections 7-8):
- *   - read_file / search_project / get_diagnostics / get_project_model are SAFE:
- *     read-only, auto-run, confined to the open workspace.
+ *   - read_file / search_project / get_diagnostics / get_project_model /
+ *     get_environment / get_hardware_graph are SAFE: read-only, auto-run,
+ *     confined to the open workspace.
  *   - propose_edit is REVIEW-REQUIRED: it never writes to disk. It stages a diff
  *     that the human approves or rejects per file; only then does the renderer
  *     apply it through the same workspace-confined write path a user edit uses.
@@ -28,6 +29,8 @@ export const READ_FILE = 'read_file'
 export const SEARCH_PROJECT = 'search_project'
 export const GET_DIAGNOSTICS = 'get_diagnostics'
 export const GET_PROJECT_MODEL = 'get_project_model'
+export const GET_ENVIRONMENT = 'get_environment'
+export const GET_HARDWARE_GRAPH = 'get_hardware_graph'
 export const PROPOSE_EDIT = 'propose_edit'
 
 /** The only tool that mutates; everything else is read-only. */
@@ -70,6 +73,18 @@ export const AGENT_TOOLS: AgentToolDef[] = [
     inputSchema: { type: 'object', properties: {}, required: [] }
   },
   {
+    name: GET_ENVIRONMENT,
+    description:
+      'Return the evidence-based environment report for the selected board: whether the board core is installed, each #include header and how it resolves (resolved via a named installed library / provided by the toolchain / unverified / MISSING confirmed by a build), available library updates with risk, and hardware findings. Every claim is backed by evidence; a header Cortex could not confirm is shown as "unverified", never as present. Use this to answer "can this build" and "what dependency is missing".',
+    inputSchema: { type: 'object', properties: {}, required: [] }
+  },
+  {
+    name: GET_HARDWARE_GRAPH,
+    description:
+      'Return the hardware relationship graph derived from the source: the board, recognized devices (from driver includes), the buses in use, the GPIO pins, and the inferred device<->bus attachments. Inferred attachments are labelled "likely" and carry the reason or caveat, so you can tell what Cortex knows from what it infers. Use this to reason about which device is on which bus and what a file controls.',
+    inputSchema: { type: 'object', properties: {}, required: [] }
+  },
+  {
     name: PROPOSE_EDIT,
     description:
       'Propose replacing the ENTIRE contents of a workspace file with new_content. This does NOT write to disk: it stages a diff for the human to approve or reject. Always read the file first and return its complete new content, not a fragment. Prefer several small, focused proposals over one sweeping rewrite.',
@@ -89,7 +104,7 @@ export const AGENT_SYSTEM_PROMPT = `You are the Cortex embedded engineering agen
 
 Work like an engineer, using the tools:
 1. Understand the request and inspect the relevant files (read_file, search_project).
-2. Ground yourself in reality: get_diagnostics for current errors/warnings, get_project_model for the board, pins, buses, and devices.
+2. Ground yourself in reality: get_diagnostics for current errors/warnings, get_project_model for the board, pins, buses, and devices, get_environment for whether the board core and required libraries are actually installed (and what is missing or unverified), and get_hardware_graph for how devices, buses, and pins relate. Trust what these report; do not assume a library or device is present unless a tool confirms it.
 3. When code must change, call propose_edit with the file's COMPLETE new content. This never writes to disk; it stages a diff the engineer approves or rejects per file. Never claim a change is applied. Prefer small, focused edits.
 4. Finish with a short plain-language summary of what you found and what you proposed.
 

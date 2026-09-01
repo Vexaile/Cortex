@@ -4,6 +4,8 @@ import {
   MUTATION_TOOLS,
   PROPOSE_EDIT,
   READ_FILE,
+  GET_ENVIRONMENT,
+  GET_HARDWARE_GRAPH,
   toAnthropicTools,
   toOpenAiTools,
   parseStructuredProposal
@@ -14,6 +16,15 @@ describe('agent tool contract', () => {
     expect(MUTATION_TOOLS.has(PROPOSE_EDIT)).toBe(true)
     expect(MUTATION_TOOLS.has(READ_FILE)).toBe(false)
     expect(MUTATION_TOOLS.size).toBe(1)
+  })
+
+  it('exposes the environment and hardware-graph tools as read-only (no-arg, not mutations)', () => {
+    for (const name of [GET_ENVIRONMENT, GET_HARDWARE_GRAPH]) {
+      const tool = AGENT_TOOLS.find((t) => t.name === name)
+      expect(tool, `${name} must be registered`).toBeTruthy()
+      expect(tool!.inputSchema.required).toEqual([]) // no arguments
+      expect(MUTATION_TOOLS.has(name)).toBe(false) // read-only, auto-run
+    }
   })
 
   it('translates to Anthropic tool shape with input_schema', () => {
