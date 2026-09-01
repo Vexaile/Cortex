@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildLock, parseLock, diffLock, LOCK_SCHEMA, type LockInput } from '../src/shared/lockfile'
+import { buildLock, parseLock, diffLock, restorePlan, LOCK_SCHEMA, type LockInput } from '../src/shared/lockfile'
 
 function input(over: Partial<LockInput> = {}): LockInput {
   return {
@@ -255,5 +255,54 @@ describe('diffLock', () => {
     expect(drift.librariesMissing).toEqual([])
     expect(drift.librariesChanged).toEqual([])
     expect(drift.inSync).toBe(true)
+  })
+})
+
+describe('restorePlan', () => {
+  it('is empty when in sync', () => {
+    const lock = buildLock(input())
+    expect(restorePlan(diffLock(lock, input()))).toEqual([])
+  })
+
+  it('installs missing and changed cores/libraries at the LOCKED version, cores first', () => {
+    const lock = buildLock(
+      input({
+        cores: [
+          { id: 'esp32:esp32', installedVersion: '3.3.11' },
+          { id: 'arduino:avr', installedVersion: '1.8.6' }
+        ]
+      })
+    )
+    // Current: esp32 core missing, ESP32Servo drifted, DHT missing.
+    const drift = diffLock(
+      lock,
+      input({
+        cores: [{ id: 'arduino:avr', installedVersion: '1.8.6' }],
+        libraries: [{ name: 'ESP32Servo', installedVersion: '3.3.0' }]
+      })
+    )
+    expect(restorePlan(drift)).toEqual([
+      { kind: 'core', target: 'esp32:esp32', version: '3.3.11' }, // missing, locked version
+      { kind: 'library', target: 'DHT sensor library', version: '1.4.7' }, // missing
+      { kind: 'library', target: 'ESP32Servo', version: '3.2.1' } // changed -> locked, not installed
+    ])
+  })
+
+  it('never uninstalls extras and never touches the board (non-destructive)', () => {
+    const lock = buildLock(input())
+    const drift = diffLock(
+      lock,
+      input({
+        fqbn: 'esp32:esp32:esp32s3', // board changed
+        libraries: [
+          { name: 'ESP32Servo', installedVersion: '3.2.1' },
+          { name: 'DHT sensor library', installedVersion: '1.4.7' },
+          { name: 'Adafruit Unified Sensor', installedVersion: '1.1.15' } // extra
+        ]
+      })
+    )
+    // Board change and the extra are drift, but the plan installs nothing:
+    // extras are never uninstalled and the board is never reverted.
+    expect(restorePlan(drift)).toEqual([])
   })
 })

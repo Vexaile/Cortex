@@ -236,3 +236,33 @@ export function diffLock(locked: CortexLock, current: LockInput): LockDrift {
     breakingCount
   }
 }
+
+export interface RestoreStep {
+  kind: 'core' | 'library'
+  /** vendor:arch for a core, library name for a library. */
+  target: string
+  /** The locked version to install (arduino-cli installs `target@version`). */
+  version: string
+}
+
+/**
+ * The ordered list of install actions that would bring the current environment
+ * back to the lock: install every core/library the lock records that is missing
+ * or installed at a different version, AT the locked version. Cores first, then
+ * libraries.
+ *
+ * Deliberately conservative and non-destructive: it NEVER uninstalls an extra
+ * (that would be a destructive change the engineer did not ask for) and NEVER
+ * touches the board target (a deliberate project choice, shown as drift but not
+ * silently reverted). Each step is executed through the same gated, streamed
+ * install path as a user-triggered install; the drift list the engineer sees is
+ * the plan, and clicking Restore is the approval.
+ */
+export function restorePlan(drift: LockDrift): RestoreStep[] {
+  const steps: RestoreStep[] = []
+  for (const c of drift.coresMissing) steps.push({ kind: 'core', target: c.id, version: c.version })
+  for (const c of drift.coresChanged) steps.push({ kind: 'core', target: c.id, version: c.locked })
+  for (const l of drift.librariesMissing) steps.push({ kind: 'library', target: l.name, version: l.version })
+  for (const l of drift.librariesChanged) steps.push({ kind: 'library', target: l.name, version: l.locked })
+  return steps
+}

@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import type { DependencyStatus, EnvFinding, FindingSeverity, UpdateStatus } from '@shared/environment'
+import { restorePlan } from '@shared/lockfile'
 import PanelHeader from './PanelHeader'
 import EmptyState from './EmptyState'
 
@@ -98,12 +99,20 @@ const RISK_CLS: Record<UpdateStatus['risk'], string> = {
 function Reproducibility(): JSX.Element {
   const lockCheck = useStore((s) => s.lockCheck)
   const lockBusy = useStore((s) => s.lockBusy)
+  const lockRestoring = useStore((s) => s.lockRestoring)
+  const running = useStore((s) => s.running)
   const snapshot = useStore((s) => s.snapshotEnvironment)
+  const restore = useStore((s) => s.restoreFromLock)
 
   const drift = lockCheck?.drift
   const has = !!lockCheck
   const inSync = drift?.inSync ?? false
   const when = lockCheck?.lock.generatedAt
+  // Installable drift only (missing/changed cores+libraries); a board change or
+  // an extra is shown but never auto-applied, so Restore appears only when there
+  // is something it can actually do.
+  const planCount = drift ? restorePlan(drift).length : 0
+  const busy = lockBusy || lockRestoring || running
 
   let StatusIcon = Camera
   let statusCls = 'text-ide-faint'
@@ -134,14 +143,26 @@ function Reproducibility(): JSX.Element {
             </div>
           )}
         </div>
-        <button
-          className="btn shrink-0 whitespace-nowrap border border-ide-border text-[11px] disabled:opacity-40"
-          onClick={() => void snapshot()}
-          disabled={lockBusy}
-          title={has ? 'Overwrite the lockfile with the current environment' : 'Record the current environment to a lockfile'}
-        >
-          <Camera size={12} /> {lockBusy ? 'Saving...' : has ? 'Re-snapshot' : 'Snapshot'}
-        </button>
+        <div className="row shrink-0 gap-1.5">
+          {has && !inSync && planCount > 0 && (
+            <button
+              className="btn whitespace-nowrap border border-ide-border text-[11px] disabled:opacity-40"
+              onClick={() => void restore()}
+              disabled={busy}
+              title={`Install the locked version of ${planCount} package${planCount === 1 ? '' : 's'} to match the snapshot`}
+            >
+              <Download size={12} /> {lockRestoring ? 'Restoring...' : `Restore ${planCount}`}
+            </button>
+          )}
+          <button
+            className="btn whitespace-nowrap border border-ide-border text-[11px] disabled:opacity-40"
+            onClick={() => void snapshot()}
+            disabled={busy}
+            title={has ? 'Overwrite the lockfile with the current environment' : 'Record the current environment to a lockfile'}
+          >
+            <Camera size={12} /> {lockBusy ? 'Saving...' : has ? 'Re-snapshot' : 'Snapshot'}
+          </button>
+        </div>
       </div>
 
       {has && drift && !inSync && (

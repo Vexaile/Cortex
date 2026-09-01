@@ -21,7 +21,7 @@ import type {
 import { langFromPath, isHeaderPath, cDriver, cppDriver, type LanguageDef } from '@shared/languages'
 import { normalizeEol, detectEol, withEol } from '@shared/diff'
 import { extractMissingHeaders, type EnvironmentReport } from '@shared/environment'
-import type { LockCheck } from '@shared/lockfile'
+import { restorePlan, type LockCheck } from '@shared/lockfile'
 import type { LspAvailability } from '@shared/lsp'
 import type { DebugState, DebugOutput } from '@shared/ipc'
 
@@ -181,10 +181,11 @@ export function workspaceScopedReset(): Record<string, unknown> {
     environmentReport: null,
     envLoading: false,
     // The lock belongs to the old project's .cortex; re-read on demand. lockBusy
-    // is cleared too, so a snapshot in flight during a switch cannot leave the
-    // new project's Snapshot button stuck disabled/"Saving...".
+    // and lockRestoring are cleared too, so a snapshot/restore in flight during a
+    // switch cannot leave the new project's buttons stuck disabled.
     lockCheck: null,
     lockBusy: false,
+    lockRestoring: false,
     // The agent transcript, staged edits, and conversation all reference the old
     // project's files, so a switch must not carry them (and any in-flight run's
     // events are dropped once agentRunId is cleared).
@@ -347,6 +348,20 @@ let reopenSerialAfterUpload = false
  * remove, update-index): reveal the Output panel, mark the app busy, then run.
  * Completion arrives via handleRunExit (phase 'run'), which clears `running`.
  */
+// A package op streams asynchronously: fn(id) only STARTS it, and completion
+// arrives later as a RUN_EXIT event handled by handleRunExit. These waiters let
+// runPackageOp resolve when the op actually FINISHES (not when it starts), so a
+// caller can sequence several installs - handleRunExit resolves the waiter for
+// the run id on every terminal exit.
+const pkgOpWaiters = new Map<string, () => void>()
+function resolvePkgOp(id: string): void {
+  const w = pkgOpWaiters.get(id)
+  if (w) {
+    pkgOpWaiters.delete(id)
+    w()
+  }
+}
+
 async function runPackageOp(
   get: () => State,
   set: (partial: Partial<State>) => void,
@@ -365,15 +380,24 @@ async function runPackageOp(
     bottomView: 'output',
     bottomVisible: true
   })
+  const done = new Promise<void>((resolve) => pkgOpWaiters.set(id, resolve))
   try {
     await fn(id)
   } catch (err) {
+    // The op never started, so no RUN_EXIT will come: resolve the waiter here so
+    // a sequencing caller is not left hanging.
+    resolvePkgOp(id)
     set({
       running: false,
       runPhase: 'idle',
+      lastExitCode: 1,
       output: [{ stream: 'stderr', text: `Operation failed: ${String(err)}\n` }]
     })
+    return
   }
+  // Resolve on actual completion (RUN_EXIT), so `await installLib(...)` means the
+  // install finished, not merely began.
+  await done
 }
 
 interface State {
@@ -459,6 +483,8 @@ interface State {
    *  no lock (reproducibility: see @shared/lockfile). */
   lockCheck: LockCheck | null
   lockBusy: boolean
+  /** True while a restore-from-lock is installing the locked versions. */
+  lockRestoring: boolean
   boards: BoardPort[]
   boardTargets: BoardTarget[]
   selectedFqbn: string
@@ -594,6 +620,9 @@ interface State {
   checkLock: () => Promise<void>
   /** Snapshot the current installed environment to the lockfile, then re-check. */
   snapshotEnvironment: () => Promise<void>
+  /** Install the locked versions of every drifted core/library (through the same
+   *  gated, streamed path as a user-triggered install), then re-check. */
+  restoreFromLock: () => Promise<void>
   refreshBoards: () => Promise<void>
   refreshBoardTargets: () => Promise<void>
   setFqbn: (fqbn: string) => void
@@ -788,6 +817,7 @@ export const useStore = create<State>((set, get) => ({
   envLoading: false,
   lockCheck: null,
   lockBusy: false,
+  lockRestoring: false,
   selectedFqbn: '',
 
   ports: [],
@@ -1525,6 +1555,10 @@ export const useStore = create<State>((set, get) => ({
     set({ output: next.length > 5000 ? next.slice(-5000) : next })
   },
   handleRunExit(e) {
+    // Resolve a package-op sequencing waiter for this run id first, independent
+    // of the runId guard below (a package op is the only thing that registers a
+    // waiter, and it emits exactly one terminal RUN_EXIT).
+    resolvePkgOp(e.id)
     if (e.id !== get().runId) return
     const { runAction } = get()
     // Board verify/upload: the compile step is terminal (no run phase follows).
@@ -1911,6 +1945,36 @@ export const useStore = create<State>((set, get) => ({
       // A failed write leaves the previous lock state untouched.
     } finally {
       set({ lockBusy: false })
+    }
+  },
+
+  async restoreFromLock() {
+    const lc = get().lockCheck
+    // Nothing to do if there is no lock, it is already in sync, or an op is
+    // already running. Board changes and extras are shown as drift but are
+    // deliberately NOT restored (see restorePlan): only installable
+    // missing/changed cores and libraries are brought back to the locked version.
+    if (!lc || lc.drift.inSync || get().running || get().lockBusy || get().lockRestoring) return
+    const plan = restorePlan(lc.drift)
+    if (plan.length === 0) return
+    set({ lockRestoring: true })
+    try {
+      for (const step of plan) {
+        // runPackageOp now resolves on completion, so these run one at a time
+        // through the same gated, streamed path as a user-triggered install.
+        if (step.kind === 'core') await get().installCore(step.target, step.version)
+        else await get().installLib(step.target, step.version)
+        // Stop on the first failed install rather than blindly pressing on: the
+        // remaining steps may depend on it, and a half-applied restore should not
+        // be silently reported as done.
+        if (get().lastExitCode !== 0) break
+      }
+    } finally {
+      set({ lockRestoring: false })
+      // Reflect the new reality: the package cache was invalidated at each op's
+      // completion, so re-check drift and re-inspect the environment.
+      await get().checkLock()
+      void get().inspectEnvironment(false)
     }
   },
 

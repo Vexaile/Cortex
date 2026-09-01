@@ -3,6 +3,41 @@
 Newest first. One entry per completed slice: what shipped, how it was verified,
 and what it unblocks. See `CORTEX_IMPLEMENTATION_PLAN.md` for the full plan.
 
+## Intelligent Dependency & Environment System: restore-from-lock (Stage 6)
+
+Made the Stage-5 lockfile actionable: a Restore that installs the locked version
+of every drifted core and library, bringing the environment back to the
+snapshot. A new pure helper (`restorePlan(drift)` in src/shared/lockfile.ts)
+turns the drift into an ordered install plan - cores first, then libraries, each
+at the LOCKED version - and is deliberately conservative: it NEVER uninstalls an
+extra (a destructive change the engineer did not ask for) and NEVER reverts the
+board target (a deliberate project choice, shown as drift but not touched). So
+Restore only appears when there is something it can safely install.
+
+Execution reuses the existing gated, streamed package path rather than a new
+one: `runPackageOp` now resolves on the op's actual COMPLETION (a RUN_EXIT
+waiter, resolved in handleRunExit) instead of at start, so `restoreFromLock` runs
+the installs one at a time, stopping on the first failure rather than pressing on
+with a half-applied environment. The drift list the engineer sees is the plan and
+the Restore button is the approval - the honesty/safety contract ("never silently
+rewrite the environment; propose, then apply") holds, and an AI-initiated restore
+would pass exactly the same gate. The Reproducibility panel section gained a
+"Restore N" button (N = installable drift count) beside Re-snapshot, disabled
+while any op runs; after a restore it re-checks drift and re-inspects.
+
+Verified live against the real arduino-cli: with the lock hand-edited to a
+different ESP32Servo version, the panel rendered "1 change since the snapshot",
+the changed drift row, and a "Restore 1" button; re-snapshotting cleared the
+drift, flipped the status to "In sync with the lockfile", and hid the button.
+The mutating install itself was deliberately NOT executed in verification (it
+would downgrade a real globally-installed library) - it reuses the installLib/
+installCore path proven in Stage 2, now sequenced by the completion-await. 3 new
+restorePlan unit tests (in-sync empty, missing+changed at locked version cores-
+first, and the non-destructive board/extra case). runPackageOp's completion
+semantics change is safe: every renderer caller is fire-and-forget (void), so
+resolving later only makes an awaited call more correct. Typecheck (node+web) and
+full suite green (700 passed).
+
 ## Intelligent Dependency & Environment System: reproducibility (Stage 5)
 
 Gave the environment a lockfile, so it can be reproduced and its drift made
