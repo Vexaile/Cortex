@@ -238,7 +238,11 @@ export default function App(): JSX.Element {
       {palette && <CommandPalette mode={palette} onClose={() => setPalette(null)} />}
       <ConfirmDialog />
       <TitleBar />
-      <Toolbar />
+      {/* The run/build toolbar belongs to the editor working on a project.
+          Hidden on the Welcome screen (nothing to run) and in the Simulator
+          (which carries its own Run/Stop), so it never shows a dead or
+          duplicate control. */}
+      {workspaceRoot && mainView !== 'simulator' && <Toolbar />}
       <div className="flex min-h-0 flex-1">
         <ActivityBar />
         {/* Framed "island" workspace: the tool panels float as rounded cards on

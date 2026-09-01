@@ -1,4 +1,4 @@
-import { Play, Square, CheckCircle2, UploadCloud, AlertTriangle, Radio, LineChart, Bug } from 'lucide-react'
+import { Play, Square, CheckCircle2, UploadCloud, AlertTriangle, Radio, LineChart, Bug, CircleX, Loader2 } from 'lucide-react'
 import { useStore, isSketch } from '../store/useStore'
 import { isHeaderPath } from '@shared/languages'
 import BoardPortSelect from './BoardPortSelect'
@@ -17,8 +17,11 @@ export default function Toolbar(): JSX.Element {
     tabs,
     activePath,
     running,
+    runPhase,
+    runAction,
     runActive,
     stopRun,
+    diagnostics,
     boardStatus,
     selectedFqbn,
     verifyBoard,
@@ -55,6 +58,22 @@ export default function Toolbar(): JSX.Element {
       ? 'Run (F5)'
       : `Cortex cannot run ${activeTab?.language.label ?? 'this'} files`
 
+  // Problems count from the last build's diagnostics (real feed, not fabricated).
+  const errorCount = diagnostics.filter((d) => d.severity === 'error').length
+  const warnCount = diagnostics.filter((d) => d.severity === 'warning').length
+  // What the current in-progress action is doing, so the run row narrates the
+  // build instead of just showing a bare Stop.
+  const phaseLabel =
+    runAction === 'verify'
+      ? 'Compiling'
+      : runAction === 'upload'
+        ? runPhase === 'compile'
+          ? 'Compiling'
+          : 'Uploading'
+        : runPhase === 'compile'
+          ? 'Compiling'
+          : 'Running'
+
   return (
     <div className="flex h-10 shrink-0 items-center gap-2 border-b border-ide-border bg-ide-bar px-2 text-[12px]">
       {/* Build target: compiler / standard / optimization for host C/C++, or
@@ -63,6 +82,30 @@ export default function Toolbar(): JSX.Element {
       {isNative && <TargetSelect kind={isC ? 'c' : 'cpp'} />}
       {isRust && <TargetSelect kind="rust" />}
 
+      {/* Problems summary from the last build. Solid red/amber on the bar (both
+          AA per contrast.test.ts), not a tinted badge, so it stays legible.
+          Opens the Problems panel. */}
+      {(errorCount > 0 || warnCount > 0) && (
+        <button
+          className="row h-7 shrink-0 items-center gap-2 rounded border border-ide-border bg-ide-bar px-2 text-[11px] transition-colors hover:border-ide-faint"
+          onClick={() => setBottom('problems')}
+          title="Open Problems"
+        >
+          {errorCount > 0 && (
+            <span className="row items-center gap-1 text-ide-red">
+              <CircleX size={13} />
+              {errorCount}
+            </span>
+          )}
+          {warnCount > 0 && (
+            <span className="row items-center gap-1 text-ide-amber">
+              <AlertTriangle size={13} />
+              {warnCount}
+            </span>
+          )}
+        </button>
+      )}
+
       <div className="flex-1" />
 
       {/* Action buttons (Verify / Upload / Debug for a sketch; Run / Debug for
@@ -70,9 +113,18 @@ export default function Toolbar(): JSX.Element {
           Arduino IDE lays it out. */}
       <div className="flex shrink-0 items-center gap-1 pl-1">
         {running ? (
-          <button className="btn bg-ide-red/90 text-white hover:brightness-110" onClick={() => void stopRun()}>
-            <Square size={14} /> Stop
-          </button>
+          <>
+            {/* Narrate the in-progress build so the row is not just a bare Stop. */}
+            <span className="row items-center gap-1.5 text-[11px] text-ide-muted">
+              {/* motion-reduce: the phase label already conveys "busy"; honor the
+                  OS reduced-motion setting like the splash animations do. */}
+              <Loader2 size={13} className="animate-spin text-ide-accent motion-reduce:animate-none" />
+              {phaseLabel}
+            </span>
+            <button className="btn bg-ide-red/90 text-white hover:brightness-110" onClick={() => void stopRun()}>
+              <Square size={14} /> Stop
+            </button>
+          </>
         ) : sketch ? (
           <>
             {/* Without arduino-cli, Verify/Upload cannot work. Simulate CAN, so it
