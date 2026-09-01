@@ -4,6 +4,7 @@ import CommandPalette, { type PaletteMode } from './components/CommandPalette'
 import ConfirmDialog from './components/ConfirmDialog'
 import Splitter from './components/Splitter'
 import TitleBar from './components/TitleBar'
+import Toolbar from './components/Toolbar'
 import ActivityBar from './components/ActivityBar'
 import SideBar from './components/SideBar'
 import EditorArea from './components/EditorArea'
@@ -237,6 +238,7 @@ export default function App(): JSX.Element {
       {palette && <CommandPalette mode={palette} onClose={() => setPalette(null)} />}
       <ConfirmDialog />
       <TitleBar />
+      <Toolbar />
       <div className="flex min-h-0 flex-1">
         <ActivityBar />
         {/* Framed "island" workspace: the tool panels float as rounded cards on

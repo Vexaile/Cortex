@@ -47,10 +47,10 @@ raw `-O0/-Os` → Debug / Balanced / Release / Size. raw `g++/clang++` → GCC /
 - Framed rounded "island" panels ✅: the middle row (after the flush ActivityBar) is a padded `gap-2 p-2` field on the ide-bg ground; SideBar / EditorArea / BottomPanel / AiPanel / SimulatorView / Welcome each render as a `rounded-lg border border-ide-border` island; splitters live in the gutters and still resize; both themes correct. Monaco needed a container `ResizeObserver` (its `automaticLayout` locked onto a collapsed mount size inside the new flex nesting and never recovered, rendering the editor ~5x5) plus `fixedOverflowWidgets` so suggest/hover are not clipped by the card's `overflow-hidden`. Live-verified via CDP.
 - Phase 2 is complete except routing the **main-process** close/exit confirm (`dialog.showMessageBox`) through the themed dialog, which is tracked for a later slice.
 
-### Phase 3  -  Shell chrome
-- Split the top bar: a slim **title/menu bar** (app mark, menus, project · target breadcrumb, window controls) and, on the right, **Search · Settings · Cortex Agent · Notifications** icon cluster.
-- Move build config OUT of the title bar into a **Target/Environment selector** (`ESP32 DevKit · Arduino · Debug`) that opens a config popover [audit HIGH: overloaded title bar, scope confusion].
-- A dedicated run toolbar row: `[Target ▾]  Build · Run ▸ · Debug ◉ · Serial Monitor · Serial Plotter`, build-state aware. Errors link to Problems.
+### Phase 3  -  Shell chrome (split into 3a / 3b / 3c)
+- **3a** ✅ Split the top bar into two tiers. TitleBar is now slim (app mark, MenuBar, project/file breadcrumb) with a right-side icon cluster: Search (opens the command palette), Settings (opens the settings sidebar, highlights when open), Cortex Agent (toggles the AI panel, highlights when open). Notifications is intentionally omitted until Phase 8 (no feature to back it). All run/build/board/serial controls moved verbatim into a new dedicated `Toolbar` row (`components/Toolbar.tsx`) rendered by App below the title bar [audit HIGH: overloaded title bar]. Live-verified via CDP.
+- **3b** Move build config OUT of the raw toolbar selects into a **Target/Environment selector** (reads like `ESP32 DevKit / Arduino / Debug`) that opens a config popover (compiler / std / optimization as Debug/Balanced/Release/Size with raw -O in a tooltip / rust edition). Per-project ProjectConfig wiring preserved.
+- **3c** Polish the run toolbar row: `[Target v]  Build / Run / Debug / Serial Monitor / Serial Plotter`, build-state aware (disable Run while building, etc.); errors link to Problems. Consider hiding the toolbar in views that carry their own run controls (Simulator).
 
 ### Phase 4  -  Tool rails + tool-window model
 - Left rail: primary tools + a "More tools" overflow (declutter), plus a bottom group (Terminal / Problems / Version Control) so the terminal etc. are one click away.
