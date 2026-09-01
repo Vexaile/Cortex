@@ -22,6 +22,7 @@ import { langFromPath, isHeaderPath, cDriver, cppDriver, type LanguageDef } from
 import { normalizeEol, detectEol, withEol } from '@shared/diff'
 import { extractMissingHeaders, type EnvironmentReport } from '@shared/environment'
 import { restorePlan, type LockCheck } from '@shared/lockfile'
+import type { DatasheetHit, DatasheetDocMeta } from '@shared/datasheet'
 import type { LspAvailability } from '@shared/lsp'
 import type { DebugState, DebugOutput } from '@shared/ipc'
 
@@ -186,6 +187,12 @@ export function workspaceScopedReset(): Record<string, unknown> {
     lockCheck: null,
     lockBusy: false,
     lockRestoring: false,
+    // The imported document corpus and any query results belong to the old
+    // project's .cortex; a switch must not carry them into the next project.
+    datasheets: [],
+    datasheetResults: [],
+    datasheetQuery: '',
+    datasheetBusy: false,
     // The agent transcript, staged edits, and conversation all reference the old
     // project's files, so a switch must not carry them (and any in-flight run's
     // events are dropped once agentRunId is cleared).
@@ -326,6 +333,7 @@ export type SidebarView =
   | 'libraries'
   | 'hardware'
   | 'environment'
+  | 'datasheets'
   | 'debug'
   | 'serial'
   | 'ai'
@@ -340,6 +348,9 @@ const nextRunId = (): string => `run-${++runCounter}`
 let envInspectSeq = 0
 // Same guard for lock checks, which also re-run on a board change.
 let lockCheckSeq = 0
+// Latest-wins for datasheet queries, so a slow earlier query cannot clobber a
+// newer one's results.
+let datasheetQuerySeq = 0
 /** Set when an upload closed the serial monitor, so we can reopen it after. */
 let reopenSerialAfterUpload = false
 
@@ -485,6 +496,14 @@ interface State {
   lockBusy: boolean
   /** True while a restore-from-lock is installing the locked versions. */
   lockRestoring: boolean
+
+  // datasheet / document intelligence
+  /** Imported documents in this project (.cortex/datasheets manifest). */
+  datasheets: DatasheetDocMeta[]
+  /** The latest query's retrieved passages with citations. */
+  datasheetResults: DatasheetHit[]
+  datasheetQuery: string
+  datasheetBusy: boolean
   boards: BoardPort[]
   boardTargets: BoardTarget[]
   selectedFqbn: string
@@ -623,6 +642,12 @@ interface State {
   /** Install the locked versions of every drifted core/library (through the same
    *  gated, streamed path as a user-triggered install), then re-check. */
   restoreFromLock: () => Promise<void>
+  /** Open a native dialog to import a document into the project's corpus. */
+  importDatasheet: () => Promise<void>
+  /** Reload the imported-document list for the open project. */
+  refreshDatasheets: () => Promise<void>
+  /** Retrieve cited passages for a query (latest-wins). */
+  queryDatasheets: (query: string) => Promise<void>
   refreshBoards: () => Promise<void>
   refreshBoardTargets: () => Promise<void>
   setFqbn: (fqbn: string) => void
@@ -818,6 +843,10 @@ export const useStore = create<State>((set, get) => ({
   lockCheck: null,
   lockBusy: false,
   lockRestoring: false,
+  datasheets: [],
+  datasheetResults: [],
+  datasheetQuery: '',
+  datasheetBusy: false,
   selectedFqbn: '',
 
   ports: [],
@@ -1975,6 +2004,52 @@ export const useStore = create<State>((set, get) => ({
       // completion, so re-check drift and re-inspect the environment.
       await get().checkLock()
       void get().inspectEnvironment(false)
+    }
+  },
+
+  async importDatasheet() {
+    const root = get().workspaceRoot
+    if (!root || get().datasheetBusy) return
+    set({ datasheetBusy: true })
+    try {
+      const res = await window.api.datasheetImport(root)
+      if (res.ok) await get().refreshDatasheets()
+      // A canceled dialog or a rejected file is a no-op (res.ok false); the panel
+      // surfaces res.error transiently through the action's return if needed.
+    } catch {
+      /* import failed; leave the corpus unchanged */
+    } finally {
+      set({ datasheetBusy: false })
+    }
+  },
+
+  async refreshDatasheets() {
+    const root = get().workspaceRoot
+    if (!root) {
+      set({ datasheets: [] })
+      return
+    }
+    try {
+      const datasheets = await window.api.datasheetList(root)
+      set({ datasheets })
+    } catch {
+      set({ datasheets: [] })
+    }
+  },
+
+  async queryDatasheets(query) {
+    const root = get().workspaceRoot
+    set({ datasheetQuery: query })
+    if (!root || !query.trim()) {
+      set({ datasheetResults: [] })
+      return
+    }
+    const seq = ++datasheetQuerySeq
+    try {
+      const results = await window.api.datasheetQuery(root, query)
+      if (seq === datasheetQuerySeq) set({ datasheetResults: results })
+    } catch {
+      if (seq === datasheetQuerySeq) set({ datasheetResults: [] })
     }
   },
 

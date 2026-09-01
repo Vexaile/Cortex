@@ -82,6 +82,8 @@ const WORKSPACE_SCOPED = [
   'selectedFqbn',
   'environmentReport',
   'lockCheck',
+  'datasheets',
+  'datasheetResults',
   'serialLines',
   'serialCarry',
   'serialError',

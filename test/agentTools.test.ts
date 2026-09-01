@@ -6,6 +6,7 @@ import {
   READ_FILE,
   GET_ENVIRONMENT,
   GET_HARDWARE_GRAPH,
+  SEARCH_DOCS,
   toAnthropicTools,
   toOpenAiTools,
   parseStructuredProposal
@@ -25,6 +26,13 @@ describe('agent tool contract', () => {
       expect(tool!.inputSchema.required).toEqual([]) // no arguments
       expect(MUTATION_TOOLS.has(name)).toBe(false) // read-only, auto-run
     }
+  })
+
+  it('exposes search_docs as a read-only retrieval tool that requires a query', () => {
+    const tool = AGENT_TOOLS.find((t) => t.name === SEARCH_DOCS)
+    expect(tool, 'search_docs must be registered').toBeTruthy()
+    expect(tool!.inputSchema.required).toEqual(['query'])
+    expect(MUTATION_TOOLS.has(SEARCH_DOCS)).toBe(false) // retrieval mutates nothing
   })
 
   it('translates to Anthropic tool shape with input_schema', () => {

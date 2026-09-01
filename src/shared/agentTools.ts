@@ -31,6 +31,7 @@ export const GET_DIAGNOSTICS = 'get_diagnostics'
 export const GET_PROJECT_MODEL = 'get_project_model'
 export const GET_ENVIRONMENT = 'get_environment'
 export const GET_HARDWARE_GRAPH = 'get_hardware_graph'
+export const SEARCH_DOCS = 'search_docs'
 export const PROPOSE_EDIT = 'propose_edit'
 
 /** The only tool that mutates; everything else is read-only. */
@@ -85,6 +86,19 @@ export const AGENT_TOOLS: AgentToolDef[] = [
     inputSchema: { type: 'object', properties: {}, required: [] }
   },
   {
+    name: SEARCH_DOCS,
+    description:
+      "Search the project's imported engineering documents (datasheets, reference manuals, application notes) for passages relevant to a query. Returns verbatim excerpts WITH a citation to the source document, section, and line - retrieval, not summary. Use this to ground register values, bit fields, timing, electrical limits, addresses, and pinouts in the actual documentation instead of recalling them. If it returns no passage, the fact is simply not in the imported docs: say so rather than inventing a value. The query is enriched with the project's own devices, so a question like 'the I2C sensor' targets the right part's datasheet.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'What to look up in the documents.' },
+        k: { type: 'string', description: 'Optional max passages to return (default 5).' }
+      },
+      required: ['query']
+    }
+  },
+  {
     name: PROPOSE_EDIT,
     description:
       'Propose replacing the ENTIRE contents of a workspace file with new_content. This does NOT write to disk: it stages a diff for the human to approve or reject. Always read the file first and return its complete new content, not a fragment. Prefer several small, focused proposals over one sweeping rewrite.',
@@ -104,7 +118,7 @@ export const AGENT_SYSTEM_PROMPT = `You are the Cortex embedded engineering agen
 
 Work like an engineer, using the tools:
 1. Understand the request and inspect the relevant files (read_file, search_project).
-2. Ground yourself in reality: get_diagnostics for current errors/warnings, get_project_model for the board, pins, buses, and devices, get_environment for whether the board core and required libraries are actually installed (and what is missing or unverified), and get_hardware_graph for how devices, buses, and pins relate. Trust what these report; do not assume a library or device is present unless a tool confirms it.
+2. Ground yourself in reality: get_diagnostics for current errors/warnings, get_project_model for the board, pins, buses, and devices, get_environment for whether the board core and required libraries are actually installed (and what is missing or unverified), get_hardware_graph for how devices, buses, and pins relate, and search_docs to look up register values, bit fields, timing, addresses, and electrical limits in the project's imported datasheets. Trust what these report; do not assume a library or device is present unless a tool confirms it. Prefer search_docs over recalling a datasheet fact, cite the document/section/line it returns, and if it returns nothing treat the fact as "not in the imported docs" rather than inventing it.
 3. When code must change, call propose_edit with the file's COMPLETE new content. This never writes to disk; it stages a diff the engineer approves or rejects per file. Never claim a change is applied. Prefer small, focused edits.
 4. Finish with a short plain-language summary of what you found and what you proposed.
 

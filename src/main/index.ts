@@ -26,6 +26,7 @@ import * as projectConfig from './services/projectConfigService'
 import * as projectModel from './services/projectModelService'
 import * as environment from './services/environmentService'
 import * as lockfile from './services/lockfileService'
+import * as datasheet from './services/datasheetService'
 import * as embedded from './services/embeddedService'
 import * as pkg from './services/packageService'
 import * as debug from './services/debugService'
@@ -651,6 +652,31 @@ function registerIpc(): void {
   )
   ipcMain.handle(IPC.ENV_LOCK_CHECK, (_e, root: string, fqbn: string | null) =>
     fsService.withinWorkspace(root) ? lockfile.check(root, fqbn) : Promise.resolve(null)
+  )
+
+  // ---- datasheet / document intelligence ----
+  // Import runs the native open dialog HERE (main), so the corpus source path is
+  // always user-chosen and never renderer-supplied; the service copies it into
+  // the workspace and every later read is workspace-confined. root gates the
+  // corpus location like the other project-data handlers.
+  ipcMain.handle(IPC.DATASHEET_IMPORT, async (_e, root: string) => {
+    if (!fsService.withinWorkspace(root)) return { ok: false, error: 'Workspace path rejected.' }
+    const res = await dialog.showOpenDialog(requireWindow(), {
+      title: 'Import datasheet or document',
+      properties: ['openFile'],
+      filters: [
+        { name: 'Documents', extensions: ['md', 'markdown', 'mdx', 'txt', 'text', 'csv', 'log'] },
+        { name: 'All files', extensions: ['*'] }
+      ]
+    })
+    if (res.canceled || !res.filePaths[0]) return { ok: false, error: 'Import canceled.' }
+    return datasheet.importFile(root, res.filePaths[0])
+  })
+  ipcMain.handle(IPC.DATASHEET_LIST, (_e, root: string) =>
+    fsService.withinWorkspace(root) ? datasheet.list(root) : Promise.resolve([])
+  )
+  ipcMain.handle(IPC.DATASHEET_QUERY, (_e, root: string, query: string) =>
+    fsService.withinWorkspace(root) ? datasheet.search(root, String(query ?? ''), 8) : Promise.resolve([])
   )
 
   // ---- embedded boards ----

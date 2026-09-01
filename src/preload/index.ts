@@ -39,6 +39,7 @@ import type {
 import type { LspCall, LspAvailability, LspDiagnosticsPush, LspServerExit, LspBusy } from '../shared/lsp'
 import type { EnvironmentReport } from '../shared/environment'
 import type { CortexLock, LockCheck } from '../shared/lockfile'
+import type { DatasheetHit, DatasheetDocMeta, DatasheetImportResult } from '../shared/datasheet'
 
 type Unsub = () => void
 
@@ -97,6 +98,12 @@ const api = {
     ipcRenderer.invoke(IPC.ENV_LOCK_WRITE, root, fqbn),
   envLockCheck: (root: string, fqbn: string | null): Promise<LockCheck | null> =>
     ipcRenderer.invoke(IPC.ENV_LOCK_CHECK, root, fqbn),
+
+  // datasheet / document intelligence
+  datasheetImport: (root: string): Promise<DatasheetImportResult> => ipcRenderer.invoke(IPC.DATASHEET_IMPORT, root),
+  datasheetList: (root: string): Promise<DatasheetDocMeta[]> => ipcRenderer.invoke(IPC.DATASHEET_LIST, root),
+  datasheetQuery: (root: string, query: string): Promise<DatasheetHit[]> =>
+    ipcRenderer.invoke(IPC.DATASHEET_QUERY, root, query),
 
   // embedded boards
   boardStatus: (): Promise<BoardStatus> => ipcRenderer.invoke(IPC.BOARD_STATUS),

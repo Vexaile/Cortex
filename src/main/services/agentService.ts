@@ -8,9 +8,11 @@ import * as fsService from './fsService'
 import { searchInFiles } from './searchService'
 import { buildProjectModel } from './projectModelService'
 import * as environment from './environmentService'
+import * as docs from './datasheetService'
 import { getProjectConfig } from './projectConfigService'
 import { buildHardwareGraph } from '../../shared/hardwareGraph'
 import { formatEnvironmentReport, formatHardwareGraph } from '../../shared/agentContext'
+import { formatDocHits } from '../../shared/datasheet'
 import {
   AGENT_TOOLS,
   AGENT_SYSTEM_PROMPT,
@@ -21,6 +23,7 @@ import {
   GET_PROJECT_MODEL,
   GET_ENVIRONMENT,
   GET_HARDWARE_GRAPH,
+  SEARCH_DOCS,
   PROPOSE_EDIT,
   toAnthropicTools,
   toOpenAiTools,
@@ -224,6 +227,14 @@ async function execTool(
     if (name === GET_HARDWARE_GRAPH) {
       const pm = await buildProjectModel(root)
       return ok(clip(formatHardwareGraph(buildHardwareGraph(pm))))
+    }
+
+    if (name === SEARCH_DOCS) {
+      const query = String(input.query ?? '')
+      if (!query.trim()) return err('Error: empty query.')
+      const k = Math.max(1, Math.min(10, Number(input.k) || 5))
+      const hits = await docs.search(root, query, k)
+      return ok(clip(formatDocHits(hits)))
     }
 
     if (name === PROPOSE_EDIT) {
@@ -434,6 +445,15 @@ async function structuredFallback(
     if (report) ctx.push('ENVIRONMENT:\n' + formatEnvironmentReport(report))
   } catch {
     /* no environment */
+  }
+  // The fallback cannot call search_docs, so pre-retrieve passages for the task
+  // (the last user message) and front-load them with their citations.
+  try {
+    const taskText = req.messages[req.messages.length - 1]?.content ?? ''
+    const hits = await docs.search(root, taskText, 5)
+    if (hits.length) ctx.push('RELEVANT DOCUMENTATION (cite these):\n' + formatDocHits(hits))
+  } catch {
+    /* no docs */
   }
   ctx.push('DIAGNOSTICS:\n' + formatDiagnostics(root, req.diagnostics))
   if (req.activePath) {

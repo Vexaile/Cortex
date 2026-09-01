@@ -1,6 +1,9 @@
 import type { BrowserWindow } from 'electron'
 import { IPC } from '../../shared/ipc'
 import { getSettings } from './settingsService'
+import * as fsService from './fsService'
+import * as docsService from './datasheetService'
+import { formatDocHits } from '../../shared/datasheet'
 import ENGINEER_GUIDE from '../prompts/embedded-engineer.md?raw'
 
 export interface AiMessage {
@@ -21,7 +24,7 @@ const EMBEDDED_SYSTEM_PROMPT = `${ENGINEER_GUIDE}
 
 ---
 
-You are answering in the Cortex chat panel. You have no tools here, so reason from what the user shows you and ask for a file, an error, or a config value when you need it rather than guessing. Be concise and concrete; prefer a focused snippet or diff over a full rewrite.`
+You are answering in the Cortex chat panel. You cannot call tools here, but relevant excerpts from the project's imported engineering documents (datasheets, reference manuals) may be provided in the context WITH citations - prefer and cite those over recalling a value from memory, and if a needed fact is not in the provided excerpts say so rather than inventing it. Otherwise reason from what the user shows you and ask for a file, an error, or a config value when you need it. Be concise and concrete; prefer a focused snippet or diff over a full rewrite.`
 
 function stream(win: BrowserWindow, id: string, delta: string, done: boolean, error?: string): void {
   if (!win.isDestroyed()) {
@@ -60,6 +63,25 @@ export async function complete(win: BrowserWindow, req: AiRequest): Promise<void
     for (const word of stub.split(' ')) stream(win, req.id, word + ' ', false)
     stream(win, req.id, '', true)
     return
+  }
+
+  // Retrieve relevant imported-document passages for the latest question and
+  // fold them into the context every provider already forwards, so chat answers
+  // are grounded in the project's datasheets with citations. Best-effort: no
+  // workspace, no docs, or any failure leaves plain chat untouched.
+  try {
+    const root = fsService.getWorkspaceRoot()
+    const lastUser = [...req.messages].reverse().find((m) => m.role === 'user')?.content ?? ''
+    if (root && lastUser.trim()) {
+      const hits = await docsService.search(root, lastUser, 5)
+      if (hits.length) {
+        req.context = ['RELEVANT DOCUMENTATION (cite these):\n' + formatDocHits(hits), req.context]
+          .filter(Boolean)
+          .join('\n\n')
+      }
+    }
+  } catch {
+    /* retrieval is optional; never break chat */
   }
 
   try {

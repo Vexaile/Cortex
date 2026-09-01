@@ -48,6 +48,12 @@ export const IPC = {
   ENV_LOCK_WRITE: 'env:lockWrite',
   ENV_LOCK_CHECK: 'env:lockCheck',
 
+  // Datasheet / document intelligence: import engineering docs (import opens a
+  // native dialog in main), list the corpus, and query it for cited passages.
+  DATASHEET_IMPORT: 'datasheet:import',
+  DATASHEET_LIST: 'datasheet:list',
+  DATASHEET_QUERY: 'datasheet:query',
+
   // Embedded boards (arduino-cli / PlatformIO): ESP32, RP2040, AVR/Arduino, ...
   BOARD_STATUS: 'board:status', // is arduino-cli available?
   BOARD_LIST_CONNECTED: 'board:listConnected',

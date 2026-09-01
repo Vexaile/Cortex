@@ -1,4 +1,4 @@
-import { Files, Search, Cpu, Library, Network, PackageCheck, Bug, Radio, Sparkles, Settings, CircuitBoard } from 'lucide-react'
+import { Files, Search, Cpu, Library, Network, PackageCheck, FileText, Bug, Radio, Sparkles, Settings, CircuitBoard } from 'lucide-react'
 import { useStore, type SidebarView } from '../store/useStore'
 
 // The sidebar rail, in the order a first-time user meets the work: find code,
@@ -10,6 +10,7 @@ const ITEMS: { view: SidebarView; icon: typeof Files; label: string }[] = [
   { view: 'libraries', icon: Library, label: 'Library Manager' },
   { view: 'hardware', icon: Network, label: 'Hardware' },
   { view: 'environment', icon: PackageCheck, label: 'Environment' },
+  { view: 'datasheets', icon: FileText, label: 'Datasheets' },
   { view: 'debug', icon: Bug, label: 'Debug' },
   { view: 'serial', icon: Radio, label: 'Serial & Devices' }
 ]

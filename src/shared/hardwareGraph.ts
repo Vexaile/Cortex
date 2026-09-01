@@ -100,6 +100,24 @@ export const DEVICE_MAP: Record<string, KnownDevice> = {
   'keypad.h': { key: 'keypad', label: 'Matrix keypad', detail: 'row/column scanned keypad', busKinds: ['gpio'] }
 }
 
+/**
+ * The known devices as a deduplicated, enumerable list (DEVICE_MAP is keyed by
+ * header basename, and several headers map to one device - two headers to
+ * mpu6050, servo.h/esp32servo.h to servo - so iterating the Record double-counts).
+ * Deduped on KnownDevice.key, first spelling wins. This is the surface a
+ * datasheet importer enumerates to auto-link an imported document to a part.
+ */
+export const KNOWN_DEVICES: KnownDevice[] = (() => {
+  const seen = new Set<string>()
+  const out: KnownDevice[] = []
+  for (const d of Object.values(DEVICE_MAP)) {
+    if (seen.has(d.key)) continue
+    seen.add(d.key)
+    out.push(d)
+  }
+  return out
+})()
+
 const norm = (p: string): string => p.replace(/\\/g, '/')
 
 const BUS_LABEL: Record<BusKind, string> = { i2c: 'I2C', spi: 'SPI', uart: 'UART' }

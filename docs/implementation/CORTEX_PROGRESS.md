@@ -3,6 +3,62 @@
 Newest first. One entry per completed slice: what shipped, how it was verified,
 and what it unblocks. See `CORTEX_IMPLEMENTATION_PLAN.md` for the full plan.
 
+## Datasheet / document intelligence (foundation)
+
+Engineering-context retrieval with citations, not "chat with a PDF" (CLAUDE.md
+section 12). Import datasheets / reference manuals / app notes; every answer is a
+verbatim passage carrying a citation back to the document, section, and line, and
+when nothing matches the system says so instead of inventing a value.
+
+Pure core (`src/shared/datasheet.ts`, dependency-free, unit-tested): markdown /
+text sectionizers that record 1-based line provenance, a local BM25 lexical index
++ query (offline, deterministic, no embeddings/network - it can make no claim it
+cannot back), citation formatting, hardware-graph query enrichment, and a
+doc<->device matcher. `KNOWN_DEVICES` was added to hardwareGraph.ts as the deduped
+join surface. Main service (`datasheetService.ts`): import (copy into the
+workspace corpus), list, and a cached search. The corpus lives in
+`<workspace>/.cortex/datasheets/`. Retrieval reaches the engineer three ways
+through one formatter: a Datasheets sidebar panel (import + query + cited results
++ device-linked corpus), a read-only `search_docs` agent tool, and pre-injected
+passages in the chat + structured-fallback context - each degrading silently to
+plain behavior with no workspace or no docs. Text/markdown first (zero new deps);
+PDF is a contained follow-on adapter feeding the same section shape. See
+`docs/DATASHEETS.md`.
+
+Reviewed by a find->verify workflow (3 dimensions, 10 agents) that confirmed 7
+findings, ALL fixed before commit:
+- (security, high/med) An untrusted, repo-shipped manifest could point a doc path
+  at a symlink escaping the workspace, or at any in-workspace file (.env,
+  secrets.h), and the read fed it verbatim into the model. Reads now ignore the
+  manifest path beyond its basename (forcing it into the corpus dir), reject a
+  symlink via lstat, and require the corpus dir's realpath to stay in the
+  workspace; imports refuse to write THROUGH a symlink and confine the corpus
+  dir's realpath. Regression-tested (manifest ../ and in-workspace escapes; the
+  symlink case is guarded for Windows privilege).
+- (perf, med) search() rebuilt the whole project model on every chat message /
+  query; the enrichment graph is now cached with the index and rebuilt only on
+  import.
+- (retrieval, med) matchDeviceForDoc now links hyphenated part numbers
+  (MPU-6050) and label alternatives (ADS1115) via contiguous-token joins, without
+  short-key false positives.
+- (retrieval, low) enrichQueryFromGraph now scopes a bus-specific query to
+  devices on that bus and drops bare-number/short description terms; docstring
+  corrected.
+- (retrieval, low) a heading-only match now shows the heading text, never an
+  empty passage.
+- (integration, low) a doc's id is the unique stored name, so two source names
+  that slug alike no longer collide (React key / citation docId).
+
+Verified live against the running app: importing-shaped corpus -> list shows the
+doc with its mpu6050 device link -> query "wake from sleep, PWR_MGMT_1" returns
+the exact PWR_MGMT_1 section at line 3, verbatim, and the panel renders it with a
+clickable citation; retrieval still serves legit docs after the security
+hardening. 19 pure + 12 service (incl. 4 confinement) unit/integration tests, the
+agent-tool contract test extended, and workspace-reset keys guarded. Typecheck
+(node+web) and full suite green (751 passed). The native-dialog import step is the
+only part not driven in the live check (a dialog cannot be scripted via CDP); its
+copy + manifest + device-link path is covered by the service integration tests.
+
 ## Environment-aware agent tools (Stage 8)
 
 Gave the engineering agent the hardware-aware context that the whole dependency/
