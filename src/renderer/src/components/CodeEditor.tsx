@@ -93,6 +93,50 @@ function defineTheme(m: typeof monaco): void {
       'editorWhitespace.foreground': '#232B38'
     }
   })
+  // Cortex Light: same tri-hue identity, darkened for contrast on an off-white
+  // ground. The chrome tokens mirror :root[data-theme='light'] in index.css.
+  m.editor.defineTheme('cortex-light', {
+    base: 'vs',
+    inherit: true,
+    rules: [
+      { token: 'comment', foreground: '60697A', fontStyle: 'italic' },
+      { token: 'keyword', foreground: 'B4700E' },
+      { token: 'keyword.directive', foreground: '8A48C0' },
+      { token: 'keyword.directive.include', foreground: '8A48C0' },
+      { token: 'number', foreground: '96700C' },
+      { token: 'number.hex', foreground: '96700C' },
+      { token: 'string', foreground: '37821F' },
+      { token: 'string.escape', foreground: '16786C' },
+      { token: 'type', foreground: '16786C' },
+      { token: 'type.identifier', foreground: '16786C' },
+      { token: 'identifier', foreground: '1A2233' },
+      { token: 'function', foreground: '1D5AD1' },
+      { token: 'macro', foreground: '8A48C0' },
+      { token: 'operator', foreground: '566173' },
+      { token: 'delimiter', foreground: '566173' },
+      { token: 'variable', foreground: '1A2233' },
+      { token: 'variable.predefined', foreground: '8A48C0' }
+    ],
+    colors: {
+      'editor.background': '#F5F6F8',
+      'editor.foreground': '#1A2233',
+      'editor.lineHighlightBackground': '#ECEFF3',
+      'editorLineNumber.foreground': '#A9B2C0',
+      'editorLineNumber.activeForeground': '#566173',
+      'editorGutter.background': '#F5F6F8',
+      'editorCursor.foreground': '#1D5AD1',
+      'editorIndentGuide.background1': '#E7EBF1',
+      'editorIndentGuide.activeBackground1': '#1D5AD1',
+      'editor.selectionBackground': '#D3E2FB',
+      'editor.selectionHighlightBackground': '#D3E2FB88',
+      'editorBracketMatch.background': '#1D5AD122',
+      'editorBracketMatch.border': '#1D5AD1',
+      'editorWidget.background': '#FFFFFF',
+      'editorHoverWidget.background': '#FFFFFF',
+      'editorSuggestWidget.background': '#FFFFFF',
+      'editorWhitespace.foreground': '#D8DEE7'
+    }
+  })
   themeDefined = true
 }
 
@@ -111,6 +155,9 @@ export default function CodeEditor({ path }: { path: string }): JSX.Element {
   const breakpoints = useStore((s) => s.breakpoints)
   const debug = useStore((s) => s.debug)
   const toggleBreakpoint = useStore((s) => s.toggleBreakpoint)
+  // Drives the Monaco theme so the editor tracks the app theme. @monaco-editor
+  // applies the theme prop reactively (setTheme) after both are defined.
+  const monacoTheme = useStore((s) => (s.settings?.theme === 'light' ? 'cortex-light' : 'cortex-dark'))
 
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null)
   const monacoRef = useRef<typeof monaco | null>(null)
@@ -219,7 +266,7 @@ export default function CodeEditor({ path }: { path: string }): JSX.Element {
     <Editor
       key={path}
       height="100%"
-      theme="cortex-dark"
+      theme={monacoTheme}
       language={tab.language.monaco}
       value={tab.content}
       beforeMount={(m) => {

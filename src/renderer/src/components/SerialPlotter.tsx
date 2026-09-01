@@ -2,9 +2,19 @@ import { LineChart } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import EmptyState from './EmptyState'
 
-// Theme tokens, not a second palette. These were near-duplicates of colors that
-// already exist (#3574f0 is JetBrains blue, ~8 degrees off our own accent).
-const COLORS = ['#2E6FE0', '#6FB65A', '#E8B44A', '#E05561', '#C58BE6', '#4FB8A8']
+// The identity hues, referenced as theme tokens (not a frozen second palette)
+// so the series track the theme: in dark these resolve to the bright hues, in
+// Cortex Light to the darkened variants that stay legible on the off-white plot
+// card. Applied via CSS (inline style), never an SVG presentation attribute,
+// because var() does not resolve in presentation attributes.
+const COLORS = [
+  'rgb(var(--ide-navy))',
+  'rgb(var(--ide-green))',
+  'rgb(var(--ide-yellow))',
+  'rgb(var(--ide-red))',
+  'rgb(var(--ide-purple))',
+  'rgb(var(--ide-cyan))'
+]
 
 function Sparkline({ values, color, w, h }: { values: number[]; color: string; w: number; h: number }): JSX.Element {
   if (values.length < 2) return <span className="text-ide-faint">...</span>
@@ -17,7 +27,7 @@ function Sparkline({ values, color, w, h }: { values: number[]; color: string; w
     .join(' ')
   return (
     <svg width={w} height={h} className="overflow-visible">
-      <polyline points={pts} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" />
+      <polyline points={pts} fill="none" style={{ stroke: color }} strokeWidth={1.5} strokeLinejoin="round" />
     </svg>
   )
 }

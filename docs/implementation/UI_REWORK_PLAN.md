@@ -42,9 +42,9 @@ raw `-O0/-Os` → Debug / Balanced / Release / Size. raw `g++/clang++` → GCC /
 ### Phase 1  -  Audit + plan  ✅ (this doc)
 
 ### Phase 2  -  Design-system foundation
-- Themed `Dialog` + `ConfirmDialog` primitive (ide-* tokens, focus trap, Esc/Enter, danger variant). Replace `window.confirm` at FileExplorer delete + close-tab discard [audit HIGH]. Route the main-process close/exit confirm through it too.
-- Cortex **Light** theme: redefine `ide-*` tokens under `:root[data-theme=light]`; a real theme switch (Settings + status/toolbar); remove/relabel the dead `theme` field [audit MEDIUM]. Add surface/elevation tokens for framed panels.
-- Framed rounded "island" panels: padding + gaps + rounded corners + subtle borders in the shell (App.tsx layout), matching the reference density without cloning it.
+- Themed `Dialog` + `ConfirmDialog` primitive (ide-* tokens, focus trap, Esc/Enter, danger variant). Replace `window.confirm` at FileExplorer delete + close-tab discard [audit HIGH]. ✅ (56bcf74). Routing the main-process close/exit confirm through it too is still open.
+- Cortex **Light** theme ✅: `ide-*` tokens are now CSS variables (styles/index.css `:root` = Dark, `:root[data-theme='light']` = Cortex Light) consumed via `rgb(var(--ide-x) / <alpha-value>)` in tailwind.config.js, so opacity utilities still work. App stamps `<html data-theme>` from `settings.theme` (dark = no attribute); `setTheme` action persists it; SettingsPanel has an Appearance Dark/Light toggle; a `cortex-light` Monaco theme tracks it. contrast.test.ts now pins WCAG AA for BOTH palettes (parsed from index.css). Live-verified via CDP.
+- Framed rounded "island" panels: padding + gaps + rounded corners + subtle borders in the shell (App.tsx layout), matching the reference density without cloning it. **(deferred to a following slice to keep the theme slice focused and verifiable)**
 
 ### Phase 3  -  Shell chrome
 - Split the top bar: a slim **title/menu bar** (app mark, menus, project · target breadcrumb, window controls) and, on the right, **Search · Settings · Cortex Agent · Notifications** icon cluster.
@@ -76,6 +76,23 @@ raw `-O0/-Os` → Debug / Balanced / Release / Size. raw `g++/clang++` → GCC /
 - Coherent layout: controls · Call Stack · Variables · Watches · Breakpoints · Threads/Tasks · Registers · Memory · Console. Honest empty state when idle; clear explanation when unavailable for a target.
 
 ### Phase 10+  -  Simulator as a dockable tool window (stop it consuming the editor) · Git surface (status/commit/push) · multi-project + recent projects + project templates · hardware graph contextual actions · datasheet contextual actions · agent context indicator · View menu + keymap · accessibility · performance · responsive (1366→2560) · final first-run regression pass.
+
+## Known a11y debt (tracked, from the slice-2b review)
+
+A dedicated accessibility slice (folds into Phase 10+ a11y) closes contrast
+misses that the token-pair test does not yet catch:
+- Tinted status/severity badges render `text-ide-{hue}` on `bg-ide-{hue}/15` (a
+  15% tint of the same hue over panel/bg) in EnvironmentPanel and AgentView. The
+  composited pair is lower than the solid pair the test pins: the red badge is
+  below AA in BOTH themes (pre-existing in dark, ~4.2:1), amber/moss also dip in
+  light. Fix: decouple the label hue from the tint (per-hue on-tint token, or a
+  solid darker badge with near-white/near-black text) and add composite-contrast
+  coverage to contrast.test.ts for both themes.
+- Red action buttons/badges using `bg-ide-red/80` + `text-white` (BottomPanel
+  Problems count, SerialMonitor + DevicesPanel Disconnect) measure ~4.0-4.2:1 in
+  light. The `/90` sites already clear AA; do NOT switch to solid red (regresses
+  dark to 3.72:1). Fix: a per-theme solid AA-guaranteed button-red token, plus a
+  white-on-red composite check in the test.
 
 ## Discipline
 

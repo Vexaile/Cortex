@@ -3,8 +3,66 @@
 @tailwind utilities;
 
 @layer base {
+  /* Semantic tokens as space-separated RGB channels so tailwind's
+     rgb(var(--ide-x) / <alpha-value>) shim keeps opacity utilities working.
+     :root is Cortex Dark (the same values the tokens used to hardcode);
+     [data-theme='light'] is Cortex Light. App sets data-theme from
+     settings.theme. See docs/THEME.md. */
   :root {
     color-scheme: dark;
+    --ide-bg: 12 16 23;
+    --ide-panel: 17 22 31;
+    --ide-bar: 23 29 40;
+    --ide-border: 35 43 56;
+    --ide-hover: 27 34 48;
+    --ide-active: 30 58 95;
+    --ide-accent: 46 111 224;
+    --ide-text: 230 235 244;
+    --ide-muted: 152 163 182;
+    --ide-faint: 125 136 153;
+    --ide-navy: 46 111 224;
+    --ide-amber: 232 149 43;
+    --ide-moss: 111 182 90;
+    --ide-green: 111 182 90;
+    --ide-yellow: 232 180 74;
+    --ide-red: 224 85 97;
+    --ide-purple: 197 139 230;
+    --ide-cyan: 79 184 168;
+    /* Scrollbar thumb: navy-tinted grays, one shade above the chrome. */
+    --ide-sb: 43 52 68;
+    --ide-sb-hover: 58 69 87;
+  }
+
+  /* Cortex Light: off-white ground, one navy accent (darkened so white button
+     text clears AA), semantic hues darkened for contrast on a light surface.
+     Same identity, inverted luminance. */
+  :root[data-theme='light'] {
+    color-scheme: light;
+    --ide-bg: 245 246 248;
+    --ide-panel: 255 255 255;
+    --ide-bar: 236 239 243;
+    --ide-border: 216 222 231;
+    --ide-hover: 231 235 241;
+    --ide-active: 211 226 251;
+    --ide-accent: 29 90 209;
+    --ide-text: 26 34 51;
+    --ide-muted: 86 97 115;
+    /* Semantic hues darkened so each clears WCAG AA (4.5:1) as TEXT on the
+       lightest solid surface it renders on (the bar); test/contrast.test.ts
+       pins these solid token-on-token pairs for both themes. (Alpha-composited
+       badge tints - text-ide-red on bg-ide-red/15 - are a lower ratio and are
+       tracked as a separate a11y slice, not yet covered.) */
+    --ide-faint: 96 105 122;
+    --ide-navy: 29 90 209;
+    --ide-amber: 155 90 10;
+    --ide-moss: 48 120 28;
+    --ide-green: 48 120 28;
+    --ide-yellow: 140 104 10;
+    --ide-red: 200 42 54;
+    --ide-purple: 138 72 192;
+    --ide-cyan: 18 110 99;
+    --ide-sb: 196 203 214;
+    --ide-sb-hover: 169 178 192;
   }
 
   html,
@@ -16,8 +74,8 @@
   }
 
   body {
-    background-color: #0c1017;
-    color: #e6ebf4;
+    background-color: rgb(var(--ide-bg));
+    color: rgb(var(--ide-text));
     font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
     font-size: 13px;
     -webkit-font-smoothing: antialiased;
@@ -40,13 +98,13 @@
     height: 10px;
   }
   ::-webkit-scrollbar-thumb {
-    background: #2b3444;
+    background: rgb(var(--ide-sb));
     border-radius: 5px;
     border: 2px solid transparent;
     background-clip: content-box;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #3a4557;
+    background: rgb(var(--ide-sb-hover));
     background-clip: content-box;
   }
   ::-webkit-scrollbar-corner {

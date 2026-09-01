@@ -61,6 +61,11 @@ export default function App(): JSX.Element {
     setSerialPlot
   } = useStore()
 
+  // The active theme drives the <html data-theme> stamp that flips every ide-*
+  // token (index.css) and the Monaco editor theme. Selected narrowly so only a
+  // theme change re-runs the effect, not every settings write.
+  const theme = useStore((s) => s.settings?.theme ?? 'dark')
+
   const [palette, setPalette] = useState<PaletteMode | null>(null)
   // booting drives the splash's fade; splashMounted keeps it in the tree until
   // the fade finishes (an invisible full-screen overlay still eats clicks).
@@ -137,6 +142,15 @@ export default function App(): JSX.Element {
     void Promise.all([minSplash, boot]).then(() => setBooting(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Apply the theme to the document root. Dark is the default, so only Light
+  // needs the stamp; clearing it (rather than writing data-theme="dark") keeps
+  // the bare :root as the single source of the dark palette.
+  useEffect(() => {
+    const root = document.documentElement
+    if (theme === 'light') root.setAttribute('data-theme', 'light')
+    else root.removeAttribute('data-theme')
+  }, [theme])
 
   // Global keyboard shortcuts.
   useEffect(() => {

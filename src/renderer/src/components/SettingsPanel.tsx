@@ -60,7 +60,7 @@ function DraftInput({
 }
 
 export default function SettingsPanel(): JSX.Element {
-  const { settings, loadSettings, updateSettings, compiler, toolchains, detectToolchains } = useStore()
+  const { settings, loadSettings, updateSettings, setTheme, compiler, toolchains, detectToolchains } = useStore()
   const [rescanning, setRescanning] = useState(false)
   const rescan = async (): Promise<void> => {
     setRescanning(true)
@@ -106,6 +106,31 @@ export default function SettingsPanel(): JSX.Element {
     <div className="flex min-h-0 flex-1 flex-col">
       <PanelHeader>Settings</PanelHeader>
       <div className="min-h-0 flex-1 space-y-4 overflow-auto p-3">
+        <section className="space-y-2">
+          <h4 className="text-[11px] font-semibold uppercase tracking-wider text-ide-faint">Appearance</h4>
+          <Field label="Theme">
+            {/* Segmented toggle rather than a select: two mutually-exclusive
+                choices read faster as buttons, and it previews the switch. */}
+            <div className="row gap-1 rounded border border-ide-border bg-ide-bg p-0.5" role="group" aria-label="Theme">
+              {(['dark', 'light'] as const).map((t) => {
+                const active = (settings.theme ?? 'dark') === t
+                return (
+                  <button
+                    key={t}
+                    className={`flex-1 rounded px-2 py-1 text-[12px] capitalize transition-colors ${
+                      active ? 'bg-ide-accent text-white' : 'text-ide-muted hover:bg-ide-hover hover:text-ide-text'
+                    }`}
+                    aria-pressed={active}
+                    onClick={() => !active && void setTheme(t)}
+                  >
+                    {t}
+                  </button>
+                )
+              })}
+            </div>
+          </Field>
+        </section>
+
         <section className="space-y-2">
           <h4 className="text-[11px] font-semibold uppercase tracking-wider text-ide-faint">Build</h4>
           {/* Blank means "use what detection found", so say which one that is

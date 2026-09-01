@@ -725,6 +725,8 @@ interface State {
 
   loadSettings: () => Promise<void>
   updateSettings: (patch: Partial<AppSettings>) => Promise<void>
+  /** Switch and persist the app theme. App applies it to <html data-theme>. */
+  setTheme: (theme: 'dark' | 'light') => Promise<void>
 }
 
 const baseName = (p: string): string => p.split(/[\\/]/).pop() || p
@@ -1901,6 +1903,10 @@ export const useStore = create<State>((set, get) => ({
   async updateSettings(patch) {
     const s = (await window.api.setSettings(patch)) as AppSettings
     set({ settings: s })
+  },
+
+  async setTheme(theme) {
+    await get().updateSettings({ theme })
   },
 
   async loadProjectConfig() {

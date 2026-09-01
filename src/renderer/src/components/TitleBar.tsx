@@ -133,7 +133,9 @@ export default function TitleBar(): JSX.Element {
 
       {workspaceName && (
         <span className="row min-w-0 gap-1.5">
-          <span className="truncate text-white">
+          {/* Theme token, not text-white: on the bar surface white is invisible
+              in Cortex Light. Matches the "Cortex" wordmark above. */}
+          <span className="truncate text-ide-text">
             {workspaceName}
             {activeTab && <span> / {activeTab.name}</span>}
           </span>
