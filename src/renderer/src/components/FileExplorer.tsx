@@ -206,7 +206,8 @@ export default function FileExplorer(): JSX.Element {
     createNewFile,
     createNewFolder,
     expanded,
-    toggleDir
+    toggleDir,
+    confirm
   } = useStore()
   const [busy, setBusy] = useState(false)
   const [menu, setMenu] = useState<{ x: number; y: number; node: FileNode } | null>(null)
@@ -282,7 +283,15 @@ export default function FileExplorer(): JSX.Element {
             label: 'Delete',
             danger: true,
             run: () => {
-              if (window.confirm(`Delete ${menu.node.name}? This cannot be undone.`)) void deleteEntry(menu.node.path)
+              const node = menu.node
+              void confirm({
+                title: `Delete ${node.isDir ? 'folder' : 'file'}?`,
+                message: `"${node.name}" will be permanently deleted. This cannot be undone.`,
+                confirmLabel: 'Delete',
+                danger: true
+              }).then((ok) => {
+                if (ok) void deleteEntry(node.path)
+              })
             }
           }
         ]

@@ -343,6 +343,23 @@ export type BottomView = 'output' | 'serial' | 'problems' | 'terminal'
 let runCounter = 0
 const nextRunId = (): string => `run-${++runCounter}`
 
+// Promise resolver for the themed confirm dialog. Kept module-level (not in the
+// store snapshot) so the store never holds a function; the host answers via
+// answerConfirm(). Replaces native window.confirm, which renders an unthemed OS
+// modal that breaks the Cortex identity.
+let confirmResolver: ((ok: boolean) => void) | null = null
+
+/** A pending themed confirmation. `danger` styles the confirm button as a
+ *  destructive action. */
+export interface ConfirmRequest {
+  title: string
+  message: string
+  confirmLabel?: string
+  cancelLabel?: string
+  danger?: boolean
+}
+export type ConfirmOptions = ConfirmRequest
+
 // Latest-wins guard for environment inspects: a slow earlier inspect must not
 // clobber the report of a newer one (e.g. after a board change).
 let envInspectSeq = 0
@@ -490,6 +507,14 @@ interface State {
   boardStatus: BoardStatus | null
   environmentReport: EnvironmentReport | null
   envLoading: boolean
+  /** A pending themed confirmation dialog, or null. Driven by confirm(). */
+  confirmDialog: ConfirmRequest | null
+  /** Show a themed confirm dialog and resolve true (confirmed) / false. Replaces
+   *  window.confirm so destructive prompts match the Cortex identity. */
+  confirm: (opts: ConfirmOptions) => Promise<boolean>
+  /** The dialog host calls this with the user's choice. */
+  answerConfirm: (ok: boolean) => void
+
   /** The stored environment lock paired with its drift, or null when there is
    *  no lock (reproducibility: see @shared/lockfile). */
   lockCheck: LockCheck | null
@@ -838,6 +863,7 @@ export const useStore = create<State>((set, get) => ({
   boardStatus: null,
   boards: [],
   boardTargets: [],
+  confirmDialog: null,
   environmentReport: null,
   envLoading: false,
   lockCheck: null,
@@ -1052,11 +1078,17 @@ export const useStore = create<State>((set, get) => ({
     set(groupPatch(reorderTabInGroup(get(), path, toIndex)))
   },
 
-  closeTab(path) {
+  async closeTab(path) {
     const closing = get().tabs.find((t) => t.path === path)
-    // Guard against silent data loss on unsaved edits.
+    // Guard against silent data loss on unsaved edits (themed confirm).
     if (closing && closing.content !== closing.savedContent) {
-      const ok = window.confirm(`Discard unsaved changes to ${closing.name}?`)
+      const ok = await get().confirm({
+        title: 'Discard unsaved changes?',
+        message: `"${closing.name}" has changes that haven't been saved. Discard them?`,
+        confirmLabel: 'Discard',
+        cancelLabel: 'Keep editing',
+        danger: true
+      })
       if (!ok) return
     }
     set(groupPatch(removeTabFromGroups(get(), path)))
@@ -1945,6 +1977,22 @@ export const useStore = create<State>((set, get) => ({
     } finally {
       if (seq === envInspectSeq) set({ envLoading: false })
     }
+  },
+
+  confirm(opts) {
+    // Resolve any prior pending confirm as cancelled before opening a new one,
+    // so a stale promise never dangles.
+    confirmResolver?.(false)
+    return new Promise<boolean>((resolve) => {
+      confirmResolver = resolve
+      set({ confirmDialog: opts })
+    })
+  },
+  answerConfirm(ok) {
+    const resolve = confirmResolver
+    confirmResolver = null
+    set({ confirmDialog: null })
+    resolve?.(ok)
   },
 
   async checkLock() {

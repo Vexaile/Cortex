@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useStore, LAST_WORKSPACE_KEY } from './store/useStore'
 import CommandPalette, { type PaletteMode } from './components/CommandPalette'
+import ConfirmDialog from './components/ConfirmDialog'
 import Splitter from './components/Splitter'
 import TitleBar from './components/TitleBar'
 import ActivityBar from './components/ActivityBar'
@@ -220,6 +221,7 @@ export default function App(): JSX.Element {
     <div className="flex h-full flex-col bg-ide-bg text-ide-text">
       {splashMounted && <Splash leaving={!booting} onExited={() => setSplashMounted(false)} />}
       {palette && <CommandPalette mode={palette} onClose={() => setPalette(null)} />}
+      <ConfirmDialog />
       <TitleBar />
       <div className="flex min-h-0 flex-1">
         <ActivityBar />
