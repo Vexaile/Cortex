@@ -3,6 +3,39 @@
 Newest first. One entry per completed slice: what shipped, how it was verified,
 and what it unblocks. See `CORTEX_IMPLEMENTATION_PLAN.md` for the full plan.
 
+## Firmware <-> simulator consistency (Stage 7)
+
+Closed the audit's core gap: the source-derived hardware graph and the simulator
+were two separate models with nothing verifying they agree, so a sketch could
+drive a pin the simulation never modelled (its effect invisible) or a part could
+sit on a pin the firmware never touches (inert), with no signal either way. A new
+pure module (`src/shared/simConsistency.ts`) reconciles the firmware's pin usage
+(ProjectModel.pins) against what the simulator has wired (its parts' board-pin
+connections) and reports two certain mismatches: "not-simulated" (a firmware pin
+with nothing wired to it, so its behavior will not appear in simulation) and
+"inert-part" (a part on a pin the firmware never uses).
+
+It holds the same honesty line as the rest of the system. Source pins are tokens:
+a numeric one ("5", "GPIO5") resolves to a board pin unambiguously (reusing
+pinCapability.parseGpio), but a named one ("A0", "LED_BUILTIN") needs a
+board-specific map we do not have, so it is listed as unresolved and never
+produces a claim. Crucially the inert-part check runs ONLY when every source
+token resolved - an unresolved "LED_BUILTIN" could be exactly the pin a part is
+on, and flagging it would be a false claim - so it is skipped (with an honest
+note) whenever a named token is present. The findings surface as a "Simulator
+consistency" section in the existing Hardware panel, beside the source-derived
+graph, each not-simulated finding click-to-source.
+
+Verified live against the real app in both directions: a sketch driving GPIO5/7/9
+plus analogRead(A0) with the default sim rig (LED on 13, button on 2) showed
+three not-simulated findings (5/7/9), A0 listed as an unchecked named pin, and NO
+inert claim about the LED or button (A0 unresolved -> inert check suppressed);
+removing the A0 read so every token resolved then produced five findings - the
+same three plus the LED@13 and button@2 correctly flagged inert. 10 new unit
+tests (both finding kinds, the unresolved-token suppression, dedupe, ordering).
+Typecheck (node+web) and full suite green (710 passed). Fully verifiable with no
+external mutation, so it needed none.
+
 ## Intelligent Dependency & Environment System: restore-from-lock (Stage 6)
 
 Made the Stage-5 lockfile actionable: a Restore that installs the locked version

@@ -1,7 +1,8 @@
 import { useMemo } from 'react'
-import { Network, RefreshCw, Cpu } from 'lucide-react'
+import { Network, RefreshCw, Cpu, AlertTriangle, Info } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { buildHardwareGraph, type HardwareGraph, type HwNode } from '@shared/hardwareGraph'
+import { simConsistency, type SimConsistencyFinding } from '@shared/simConsistency'
 import PanelHeader from './PanelHeader'
 import EmptyState from './EmptyState'
 
@@ -65,10 +66,40 @@ function sitesFor(graph: HardwareGraph, nodeId: string): Array<{ file: string; l
     .map((e) => ({ file: e.file!, line: e.line! }))
 }
 
+/** One firmware<->simulator consistency finding. */
+function ConsistencyRow({ f }: { f: SimConsistencyFinding }): JSX.Element {
+  const Icon = f.severity === 'warning' ? AlertTriangle : Info
+  const cls = f.severity === 'warning' ? 'text-ide-amber' : 'text-ide-faint'
+  return (
+    <div className="px-3 py-1 pl-6">
+      <div className="row items-start gap-2">
+        <Icon size={13} className={`mt-0.5 shrink-0 ${cls}`} />
+        <div className="min-w-0 flex-1">
+          <div className="text-ide-text">{f.title}</div>
+          <div className="text-[11px] leading-snug text-ide-muted">{f.detail}</div>
+          {f.file && f.line != null && (
+            <div className="pt-0.5">
+              <SiteLink file={f.file} line={f.line} />
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function HardwarePanel(): JSX.Element {
   const projectModel = useStore((s) => s.projectModel)
   const refreshProjectModel = useStore((s) => s.refreshProjectModel)
+  const simParts = useStore((s) => s.simParts)
   const graph = useMemo(() => (projectModel ? buildHardwareGraph(projectModel) : null), [projectModel])
+  // Reconcile the firmware's pin usage against what the simulator has wired. Both
+  // are observed models; the check reports only certain mismatches (see
+  // @shared/simConsistency), so it can safely live beside the source-derived graph.
+  const consistency = useMemo(
+    () => (projectModel ? simConsistency(projectModel.pins, simParts) : null),
+    [projectModel, simParts]
+  )
 
   const board = graph?.nodes.find((n) => n.kind === 'board')
   const devices = graph?.nodes.filter((n) => n.kind === 'device') ?? []
@@ -137,6 +168,19 @@ export default function HardwarePanel(): JSX.Element {
               <NodeRow key={p.id} node={p} sites={sitesFor(graph!, p.id)} />
             ))}
           </Section>
+
+          {consistency && (
+            <Section title="Simulator consistency" count={consistency.findings.length}>
+              {consistency.findings.map((f) => (
+                <ConsistencyRow key={f.id} f={f} />
+              ))}
+              {consistency.unresolvedPins.length > 0 && (
+                <div className="px-3 py-1 pl-6 text-[11px] text-ide-faint">
+                  Named pins not checked (no board pin map): {consistency.unresolvedPins.join(', ')}.
+                </div>
+              )}
+            </Section>
+          )}
 
           {graph!.incomplete && (
             <div className="px-3 py-1.5 text-[11px] text-ide-faint">
