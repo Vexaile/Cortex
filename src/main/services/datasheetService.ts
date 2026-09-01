@@ -1,7 +1,8 @@
 import { promises as fs } from 'fs'
-import { join, basename } from 'path'
+import { join, basename, extname } from 'path'
 import * as fsService from './fsService'
 import { buildProjectModel } from './projectModelService'
+import { extractPdf, isPdfAvailable } from './pdfExtractor'
 import { buildHardwareGraph, KNOWN_DEVICES, type HardwareGraph } from '../../shared/hardwareGraph'
 import {
   sectionize,
@@ -10,6 +11,7 @@ import {
   enrichQueryFromGraph,
   matchDeviceForDoc,
   type DatasheetDoc,
+  type DatasheetSection,
   type DatasheetHit,
   type DatasheetDocMeta,
   type DatasheetImportResult,
@@ -128,6 +130,49 @@ async function safeCorpusPath(root: string, storedName: string): Promise<string 
   }
 }
 
+/** Write a file into the (already realpath-confined) corpus dir, refusing to
+ *  write THROUGH a symlink planted at the destination name. Returns an error
+ *  string, or null on success. */
+async function safeWrite(realDir: string, name: string, content: string): Promise<string | null> {
+  const dest = join(realDir, name)
+  try {
+    const existing = await fs.lstat(dest).catch(() => null)
+    if (existing && existing.isSymbolicLink()) return `Refused: a symlink occupies ${name}.`
+    await fs.writeFile(dest, content, 'utf8')
+    return null
+  } catch (e) {
+    return `Could not store ${name}: ${e instanceof Error ? e.message : String(e)}`
+  }
+}
+
+/** Validate a PDF doc's extracted-sections sidecar (our own file, but a cloned
+ *  repo could ship a crafted one). It supplies display text + line/page numbers,
+ *  never a path. line/page must be positive integers (a bogus L:NaN / L:-5 /
+ *  L:Infinity citation resolves nowhere), and the served text is cross-checked
+ *  against the stored .txt by the caller so a crafted sidecar cannot inject a
+ *  "verbatim" passage that is not in the extracted document. */
+function parseSidecarSections(raw: string): DatasheetSection[] | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  if (!Array.isArray(parsed)) return null
+  const posInt = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 1
+  const out: DatasheetSection[] = []
+  for (const s of parsed) {
+    if (!s || typeof s !== 'object') continue
+    const sec = s as Record<string, unknown>
+    if (!posInt(sec.line) || typeof sec.text !== 'string') continue
+    const section: DatasheetSection = { line: sec.line, text: sec.text }
+    if (posInt(sec.page)) section.page = sec.page
+    if (typeof sec.title === 'string') section.title = sec.title
+    out.push(section)
+  }
+  return out
+}
+
 // In-memory cache, one workspace at a time (the panel and the agent both query
 // the open project). Holds the BM25 index, the parsed docs, and the hardware
 // graph used for query enrichment - so retrieval never re-walks the project on
@@ -147,55 +192,117 @@ export async function list(root: string): Promise<StoredDoc[]> {
 
 /**
  * Import a user-chosen document. `srcPath` is an absolute path from the native
- * open dialog (main-process, user-authorized); it is read once, then copied into
- * the workspace corpus. Binary (e.g. PDF) and oversized files are refused with a
- * clear message - PDF extraction is a future adapter.
+ * open dialog (main-process, user-authorized). A markdown/text file is copied
+ * verbatim into the corpus; a PDF is extracted (pdfExtractor) into a stored
+ * plain-text rendering plus a sections sidecar carrying page provenance. All
+ * corpus writes are symlink-safe and confined to the realpath'd corpus dir. The
+ * manifest entry, and the record returned to the renderer, follow.
  */
 export async function importFile(root: string, srcPath: string): Promise<DatasheetImportResult> {
   if (!root) return { ok: false, error: 'No workspace is open.' }
   if (!srcPath) return { ok: false, error: 'No file selected.' }
+  const realDir = await ensureCorpusDir(root)
+  if (!realDir) return { ok: false, error: 'Refused: the corpus directory resolves outside the workspace.' }
+
+  const origName = basename(srcPath)
+  const isPdf = extname(srcPath).toLowerCase() === '.pdf'
+  // Read the manifest up front so an import can refuse to clobber a stored file
+  // that belongs to a DIFFERENT existing document (see wouldCollide).
+  const existing = (await readManifest(root)).docs
+  const entry = isPdf
+    ? await importPdf(realDir, srcPath, origName, existing)
+    : await importText(realDir, srcPath, origName, existing)
+  if (!entry.ok) return entry
+
+  // Replace an existing entry with the same stored path (a true re-import
+  // overwrites). The id is the (unique) stored name.
+  const docs = existing.filter((d) => d.path !== entry.doc.path)
+  docs.push(entry.doc)
+  docs.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
+  await writeManifest(root, { docs })
+  invalidate(root)
+  return { ok: true, name: origName, deviceKey: entry.doc.deviceKey }
+}
+
+type StoreResult = { ok: true; doc: StoredDoc } | { ok: false; error: string }
+
+/** The stored file basenames an existing doc owns (its text and, for a PDF, its
+ *  sidecar). */
+function occupiedNames(d: StoredDoc): string[] {
+  return [basename(d.path), d.sectionsPath ? basename(d.sectionsPath) : ''].filter(Boolean)
+}
+
+/**
+ * The first target name that would overwrite a file owned by a DIFFERENT
+ * document, or null when clear. A true same-kind re-import of the same stored
+ * name is allowed (it intentionally overwrites its own file); a collision with a
+ * different doc - e.g. a text import named `x.pdf.txt` landing on a PDF's stored
+ * text, or on any doc's sidecar - is refused so no import silently destroys
+ * another.
+ */
+function wouldCollide(existing: StoredDoc[], targets: string[], isSelf: (d: StoredDoc, target: string) => boolean): string | null {
+  for (const d of existing) {
+    const occ = occupiedNames(d)
+    for (const t of targets) {
+      if (occ.includes(t) && !isSelf(d, t)) return t
+    }
+  }
+  return null
+}
+
+/** Copy a markdown/text source into the corpus (refusing binaries). */
+async function importText(realDir: string, srcPath: string, origName: string, existing: StoredDoc[]): Promise<StoreResult> {
   let content: string
   try {
     const r = await fsService.readFile(srcPath)
     if (r.kind === 'binary') {
-      return { ok: false, error: `${basename(srcPath)} is not a text document. Import markdown or plain-text datasheets (PDF support is coming).` }
+      return { ok: false, error: `${origName} is not a text document. Import a markdown/text file, or a PDF.` }
     }
-    if (r.kind === 'too-large') {
-      return { ok: false, error: `${basename(srcPath)} is too large to import (${r.size} bytes).` }
-    }
+    if (r.kind === 'too-large') return { ok: false, error: `${origName} is too large to import (${r.size} bytes).` }
     content = r.content
   } catch (e) {
     return { ok: false, error: `Could not read the file: ${e instanceof Error ? e.message : String(e)}` }
   }
-
   const name = safeName(srcPath)
-  const rel = relPath(name)
-  const realDir = await ensureCorpusDir(root)
-  if (!realDir) return { ok: false, error: 'Refused: the corpus directory resolves outside the workspace.' }
-  const dest = join(realDir, name)
-  try {
-    // Refuse to write THROUGH a symlink planted at the destination name, which
-    // would push the content to an attacker-chosen path outside the workspace.
-    const existing = await fs.lstat(dest).catch(() => null)
-    if (existing && existing.isSymbolicLink()) {
-      return { ok: false, error: 'Refused: a symlink already occupies the destination name.' }
-    }
-    await fs.writeFile(dest, content, 'utf8')
-  } catch (e) {
-    return { ok: false, error: `Could not store the document: ${e instanceof Error ? e.message : String(e)}` }
-  }
+  // Self = an existing non-PDF doc stored under exactly this name (re-import).
+  const clash = wouldCollide(existing, [name], (d, t) => d.kind !== 'pdf' && d.path === relPath(t))
+  if (clash) return { ok: false, error: `A different document already uses "${clash}". Remove it first.` }
+  const werr = await safeWrite(realDir, name, content)
+  if (werr) return { ok: false, error: werr }
+  return { ok: true, doc: { id: name, name: origName, path: relPath(name), kind: kindOf(name), deviceKey: matchDeviceForDoc(name, KNOWN_DEVICES) } }
+}
 
-  const deviceKey = matchDeviceForDoc(name, KNOWN_DEVICES)
-  const m = await readManifest(root)
-  // Replace an existing entry with the same stored path (re-import overwrites).
-  // The id is the (unique) stored name, so two source names that would slug to
-  // the same value keep distinct ids (no duplicate React key / colliding docId).
-  const docs = m.docs.filter((d) => d.path !== rel)
-  docs.push({ id: name, name: basename(srcPath), path: rel, kind: kindOf(name), deviceKey })
-  docs.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
-  await writeManifest(root, { docs })
-  invalidate(root)
-  return { ok: true, name: basename(srcPath), deviceKey }
+/** Extract a PDF's text layer into the corpus: a revealable `.txt` plus a
+ *  sections sidecar carrying page provenance. Both stored under a `.pdf.*`
+ *  namespace so a PDF's artifacts cannot collide with a plausible markdown/text
+ *  import name (e.g. `notes.txt` vs a `notes.pdf` import). */
+async function importPdf(realDir: string, srcPath: string, origName: string, existing: StoredDoc[]): Promise<StoreResult> {
+  if (!(await isPdfAvailable())) {
+    return { ok: false, error: 'PDF support is not available in this build. Import a markdown or text document instead.' }
+  }
+  const stem = safeName(srcPath).replace(/\.[^.]+$/, '') || 'document'
+  const txtName = `${stem}.pdf.txt`
+  const sidecarName = `${stem}.pdf.sections.json`
+  // Self = an existing PDF doc that already owns these exact artifact names.
+  const clash = wouldCollide(existing, [txtName, sidecarName], (d) => d.kind === 'pdf' && d.path === relPath(txtName))
+  if (clash) return { ok: false, error: `A different document already uses "${clash}". Remove it first.` }
+  const res = await extractPdf(srcPath)
+  if (!res.ok) return { ok: false, error: res.error }
+  const werr = await safeWrite(realDir, txtName, res.text)
+  if (werr) return { ok: false, error: werr }
+  const serr = await safeWrite(realDir, sidecarName, JSON.stringify(res.sections))
+  if (serr) return { ok: false, error: serr }
+  return {
+    ok: true,
+    doc: {
+      id: txtName,
+      name: origName,
+      path: relPath(txtName),
+      kind: 'pdf',
+      sectionsPath: relPath(sidecarName),
+      deviceKey: matchDeviceForDoc(origName, KNOWN_DEVICES)
+    }
+  }
 }
 
 /** Read the stored corpus, sectionize it, and build the BM25 index + the
@@ -209,13 +316,32 @@ async function loadCorpus(root: string): Promise<{ index: DocIndex; docs: Datash
     // path is untrusted, so only its basename is honored (see safeCorpusPath).
     const abs = await safeCorpusPath(root, s.path)
     if (!abs) continue
+    // The citation path is recomputed from the trusted basename, never the raw
+    // manifest path, so a citation always resolves inside the corpus dir.
+    const path = relPath(basename(abs))
     try {
-      const r = await fsService.readFile(abs)
-      if (r.kind !== 'text') continue
-      // The citation path is recomputed from the trusted basename, never the raw
-      // manifest path, so a citation always resolves inside the corpus dir.
-      const base = basename(abs)
-      docs.push({ id: s.id, name: s.name, path: relPath(base), deviceKey: s.deviceKey, sections: sectionize(r.content, s.kind) })
+      let sections: DatasheetSection[]
+      if (s.kind === 'pdf') {
+        // Page provenance can't be recovered by re-sectionizing plain text, so a
+        // PDF's sections come from its sidecar (equally confined to the corpus).
+        const sidecarAbs = s.sectionsPath && (await safeCorpusPath(root, s.sectionsPath))
+        if (!sidecarAbs) continue
+        const parsed = parseSidecarSections(await fs.readFile(sidecarAbs, 'utf8'))
+        if (!parsed) continue
+        // Honesty cross-check: the served/cited passage must actually appear in
+        // the revealable stored .txt, so a crafted sidecar cannot inject a
+        // "verbatim" passage that is not in the extracted document. A legitimate
+        // sidecar's text is always a slice of the .txt, so this only drops fakes.
+        const txt = await fsService.readFile(abs)
+        if (txt.kind !== 'text') continue
+        sections = parsed.filter((sec) => txt.content.includes(sec.text))
+        if (sections.length === 0) continue
+      } else {
+        const r = await fsService.readFile(abs)
+        if (r.kind !== 'text') continue
+        sections = sectionize(r.content, s.kind === 'markdown' ? 'markdown' : 'text')
+      }
+      docs.push({ id: s.id, name: s.name, path, deviceKey: s.deviceKey, sections })
     } catch {
       /* skip a doc that vanished from disk */
     }

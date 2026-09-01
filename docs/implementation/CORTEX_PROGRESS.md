@@ -3,6 +3,59 @@
 Newest first. One entry per completed slice: what shipped, how it was verified,
 and what it unblocks. See `CORTEX_IMPLEMENTATION_PLAN.md` for the full plan.
 
+## Datasheet intelligence: PDF adapter
+
+Extended document intelligence to PDFs - the format datasheets actually ship in
+- as a contained adapter behind the existing `DatasheetSection[]` interface, so
+the BM25 engine, citations, IPC, and panel are unchanged. A new `pdfExtractor.ts`
+uses **pdf2json** (pure-JS, zero native deps, Node-20-safe) loaded lazily and
+declared an OPTIONAL dependency, so a missing/broken install degrades to
+`isPdfAvailable()=false` and never blocks app start. It reads the structured
+per-page text runs, rebuilds lines gap-aware, splits pages into blocks, and is
+bounded. pdfjs-dist was rejected: its `Promise.withResolvers` needs Node 22 and
+Electron 33's Node is 20. On import a PDF is stored as a revealable `<stem>.pdf.txt`
+plus a `<stem>.pdf.sections.json` sidecar carrying page provenance; `loadCorpus`
+reads the sidecar (through the same symlink/realpath corpus confinement) and a
+citation now carries `p.N`. pdf2json is externalized in electron.vite.config.ts
+(kept a runtime dynamic import, not bundled - verified in the prod build).
+
+An adversarial find->verify review (16 agents) confirmed 11 findings, ALL fixed
+here before commit:
+- [HIGH] pdf2json v4 dropped URI-encoding, so the initial `decodeURIComponent`
+  double-decoded and corrupted any literal %XX (e.g. `printf("0x%02X")` injected
+  a control byte) - a verbatim/honesty violation my %-free test PDFs missed. Now
+  the run text is used as-is; a `%02X` regression test asserts byte-identical
+  output.
+- [HIGH]/[MED] robustness: the parse runs on the main thread and a same-thread
+  timeout cannot interrupt a synchronous pdf.js hang, and the parser was never
+  torn down (leak). Fixed the over-claiming docstring to be honest, added a
+  `finalize()` that clears the timer + `parser.destroy()` (aborts pdf2json's
+  async pipeline, frees buffers) on every settle path, and lowered the byte cap
+  to 20MB as the real main-thread guard. Full main-thread-hang immunity
+  (worker_thread/utilityProcess isolation) is the documented next hardening.
+- [MED] a crafted PDF sidecar could inject a "verbatim" passage absent from the
+  stored .txt: `loadCorpus` now cross-checks each PDF section's text is a
+  substring of the revealable .txt and drops any that isn't (this also
+  neutralizes the non-atomic-write [LOW]: a torn write yields fewer sections,
+  never wrong ones).
+- [MED] namespace collision (`notes.txt` vs a `notes.pdf` import) caused silent
+  data loss: PDF artifacts now live under a `.pdf.txt`/`.pdf.sections.json`
+  namespace and imports refuse to overwrite a file owned by a different document.
+- [MED] the dataError handler discarded the real IO error (mislabeling an
+  ENOENT/EBUSY as "corrupt PDF"); it now preserves the raw Error.
+- [LOW] gap-aware line join keeps kerning-split tokens whole (`0x68`, not
+  `0x 68`); [LOW] sidecar line/page must be positive integers; [LOW] isPdfAvailable
+  no longer caches a transient import failure.
+
+Verified: 7 extractor + 17 service tests (real PDFs via a `test/makePdf.ts`
+generator, no mocks) covering page/line provenance, the %XX regression, gap-join,
+the fabricated-sidecar and numeric-sanity confinements, and the namespace-
+collision protection; full suite green (763 passed); prod `npm run build`
+succeeds with pdf2json externalized; live - a real BME280 PDF imported through the
+actual pipeline, and the app returned its page-2 section with a rendered
+`p.2 L:4` citation, still correct after the security hardening. Docs in
+`docs/DATASHEETS.md`.
+
 ## Datasheet / document intelligence (foundation)
 
 Engineering-context retrieval with citations, not "chat with a PDF" (CLAUDE.md

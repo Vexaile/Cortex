@@ -9,10 +9,13 @@ export default defineConfig({
     // stay external: bundling relocates their prebuilt .node files, and their
     // node-gyp-build loader then cannot find the binary at runtime, so the
     // dynamic import throws and the feature silently reports itself unavailable.
-    plugins: [externalizeDepsPlugin({ include: ['@homebridge/node-pty-prebuilt-multiarch', 'serialport'] })],
+    // pdf2json is an optional (pure-JS) dep too, lazy-imported by the datasheet
+    // PDF adapter; externalize it so rollup keeps the dynamic import intact
+    // rather than trying to bundle a type:"module" package into the CJS main.
+    plugins: [externalizeDepsPlugin({ include: ['@homebridge/node-pty-prebuilt-multiarch', 'serialport', 'pdf2json'] })],
     build: {
       rollupOptions: {
-        external: ['@homebridge/node-pty-prebuilt-multiarch', 'serialport'],
+        external: ['@homebridge/node-pty-prebuilt-multiarch', 'serialport', 'pdf2json'],
         input: { index: resolve('src/main/index.ts') }
       }
     }

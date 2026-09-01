@@ -154,7 +154,7 @@ export default function DatasheetsPanel(): JSX.Element {
 
             {datasheets.length === 0 && (
               <EmptyState icon={<FilePlus size={22} />}>
-                No documents imported yet. Use the Import button above to add a markdown or text datasheet; PDF support is coming.
+                No documents imported yet. Use the Import button above to add a PDF, markdown, or text datasheet.
               </EmptyState>
             )}
           </div>

@@ -22,17 +22,29 @@ src/main/services/datasheetService.ts   IO: import (copy into the corpus),
                                query). Owns the on-disk corpus + the index cache.
 ```
 
-- **Corpus**: imported documents are copied into `<workspace>/.cortex/datasheets/`,
-  tracked by a `manifest.json` there. The stored copy is the source of truth and
-  is revealable in the editor, so a citation opens the doc at its line.
+- **Corpus**: imported documents live in `<workspace>/.cortex/datasheets/`,
+  tracked by a `manifest.json` there. A markdown/text file is copied verbatim; a
+  PDF is extracted to a `<stem>.txt` (the revealable, line-addressable artifact)
+  plus a `<stem>.sections.json` sidecar carrying page provenance. The stored text
+  is the source of truth, so a citation opens it at its line.
+- **PDF**: extracted by `pdfExtractor.ts` using **pdf2json** (a pure-JS,
+  zero-native-dependency parser) - loaded lazily and declared an *optional*
+  dependency, so a missing/broken install degrades to `isPdfAvailable()=false`
+  and never blocks app start (the serialport/node-pty pattern). It reads the
+  structured per-page text runs, rebuilds lines by their x/y coordinates, splits
+  pages into blocks on vertical gaps, and is bounded (bytes/pages/time). A
+  scanned / image-only PDF has no text layer, so extraction yields nothing and
+  reports it honestly - OCR is out of scope, empty is never dressed up as
+  success. pdfjs-dist was avoided: its `Promise.withResolvers` needs Node 22,
+  and Electron's Node is 20.
 - **Retrieval**: a local **BM25** lexical index over the documents' sections. No
   embeddings and no network - offline, deterministic, and unable to make a claim
   it cannot back. The tokenizer keeps technical tokens whole (`0x68`, `GPIO5`,
   `TIM2`, `PA5`) because those are exactly what a datasheet query is about.
-- **Provenance**: each section records the 1-based line it starts on (and a page
-  once a PDF adapter supplies one). A `DocCitation` carries doc name, section
-  title, line, and optional page; `formatCitation` / `formatDocHits` render it
-  identically everywhere.
+- **Provenance**: each section records the 1-based line it starts on, plus the
+  1-based page for a PDF. A `DocCitation` carries doc name, section title, line,
+  and optional page; `formatCitation` / `formatDocHits` render it identically
+  everywhere.
 - **Correlation**: `KnownDevice.key` from the hardware graph is the join key. At
   import, `matchDeviceForDoc` links a document to a device the project uses (by
   whole-token name match). At query, `enrichQueryFromGraph` adds the used
@@ -55,22 +67,28 @@ formatter so citations render identically:
 
 ## Security
 
-- The corpus is confined to `<workspace>/.cortex/datasheets/`.
+- The corpus is confined to `<workspace>/.cortex/datasheets/` on the *physical*
+  filesystem, not by a string prefix. The `manifest.json` and a PDF's sidecar
+  travel with a cloned repo and are **untrusted**: a corpus read honors only the
+  stored basename (forced into the corpus dir), rejects a symlink (`lstat`), and
+  requires the corpus dir's realpath to stay inside the workspace - so a crafted
+  manifest/sidecar cannot read `../etc/passwd`, an in-workspace secret, or a
+  symlink target into the AI context.
 - The **only** read of a path outside the workspace is the one user-chosen file
   at import, and that path comes from a native open dialog invoked in the **main
   process** (the `DATASHEET_IMPORT` handler) - never from the renderer or the AI.
-- Stored names are sanitized (`safeName`) to a conservative charset with no path
-  separators, and the write destination is `withinWorkspace`-checked. `LIST` and
-  `QUERY` are root-gated exactly like `ENV_INSPECT`.
-- `readFile` refuses binaries and oversized files, so a PDF or a huge blob is
-  rejected with an honest message rather than parsed into garbage.
+- Stored names are sanitized (`safeName`); every corpus write is symlink-safe
+  (refuses to write through a planted link) and confined to the realpath'd corpus
+  dir. `LIST` and `QUERY` are root-gated like `ENV_INSPECT`.
+- A non-PDF binary or oversized file is refused with an honest message; a PDF is
+  routed to the extractor, and a malformed / no-text PDF fails cleanly rather
+  than being parsed into garbage.
 
 ## Extension points
 
-- **PDF (and other formats)**: add one extractor that produces the same
-  `DatasheetSection[]` shape (with `page`); the index, citations, IPC, and panel
-  do not change. See `docs/implementation/CORTEX_PROGRESS.md` for the contained
-  PDF-adapter plan (pdfjs-dist legacy, lazy-loaded, optional dependency).
+- **More formats**: add one extractor producing the same `DatasheetSection[]`
+  shape (with `page`); the index, citations, IPC, and panel do not change - PDF
+  (`pdfExtractor.ts`) is exactly such an adapter.
 - **New device correlations**: add to `DEVICE_MAP` in `hardwareGraph.ts`;
   `KNOWN_DEVICES` and the doc matcher pick it up automatically.
 
@@ -80,6 +98,10 @@ formatter so citations render identically:
   provenance), BM25 ranking + determinism + no-zero-score citations, citation
   formatting, enrichment, and the device matcher.
 - `test/datasheetService.test.ts` - real IO: import copy + manifest + device
-  link, binary refusal, name sanitization, search over the stored corpus, and
+  link, binary refusal, malformed-PDF refusal, name sanitization, PDF import
+  (`.txt` + sidecar + page-cited search), untrusted-manifest confinement, and
   cache invalidation on re-import.
+- `test/pdfExtractor.test.ts` - real PDF extraction (pdf2json runs, no mock):
+  page + line provenance, honest empty result for a no-text PDF, graceful failure
+  on a malformed/missing file. `test/makePdf.ts` generates valid PDFs for both.
 - `test/agentTools.test.ts` - `search_docs` is registered read-only.

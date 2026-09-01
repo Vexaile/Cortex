@@ -35,6 +35,7 @@
   },
   "optionalDependencies": {
     "@homebridge/node-pty-prebuilt-multiarch": "^0.14.1",
+    "pdf2json": "^4.0.3",
     "serialport": "^12.0.0"
   },
   "devDependencies": {

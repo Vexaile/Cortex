@@ -665,7 +665,7 @@ function registerIpc(): void {
       title: 'Import datasheet or document',
       properties: ['openFile'],
       filters: [
-        { name: 'Documents', extensions: ['md', 'markdown', 'mdx', 'txt', 'text', 'csv', 'log'] },
+        { name: 'Documents', extensions: ['pdf', 'md', 'markdown', 'mdx', 'txt', 'text', 'csv', 'log'] },
         { name: 'All files', extensions: ['*'] }
       ]
     })

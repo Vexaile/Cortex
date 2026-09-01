@@ -66,9 +66,16 @@ export interface DatasheetHit {
 export interface DatasheetDocMeta {
   id: string
   name: string
-  /** Workspace-relative stored path, e.g. ".cortex/datasheets/MPU6050.md". */
+  /** Workspace-relative path of the revealable text (the stored .md/.txt, or a
+   *  PDF's extracted .txt), e.g. ".cortex/datasheets/MPU6050.md". */
   path: string
-  kind: 'markdown' | 'text'
+  /** How the stored text is sectionized on load. A `pdf` doc's sections are read
+   *  from a pre-extracted sidecar (page provenance can't be recovered by
+   *  re-sectionizing plain text), not produced by the text sectionizer. */
+  kind: 'markdown' | 'text' | 'pdf'
+  /** For a `pdf` doc: the workspace-relative path of the extracted-sections
+   *  sidecar JSON (DatasheetSection[] with page + line). */
+  sectionsPath?: string
   /** Auto-linked hardware-graph device key, when the name matched a known part. */
   deviceKey?: string
 }
