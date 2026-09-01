@@ -186,7 +186,15 @@ interface RawLib {
   sentence?: string
   website?: string
   version?: string
-  library?: { name?: string; version?: string; author?: string; sentence?: string; website?: string }
+  library?: {
+    name?: string
+    version?: string
+    author?: string
+    sentence?: string
+    website?: string
+    provides_includes?: string[]
+    architectures?: string[]
+  }
 }
 
 function normalizeLib(l: RawLib): LibPackage | null {
@@ -197,6 +205,13 @@ function normalizeLib(l: RawLib): LibPackage | null {
   const latestRel = l.latest ?? {}
   const versionsRaw = l.available_versions ?? (l.releases ? Object.keys(l.releases) : [])
   const versions = sortVersionsDesc(versionsRaw)
+  // provides_includes / architectures only appear on `lib list` (installed).
+  const provides = Array.isArray(l.library?.provides_includes)
+    ? l.library!.provides_includes.filter((h): h is string => typeof h === 'string')
+    : undefined
+  const archs = Array.isArray(l.library?.architectures)
+    ? l.library!.architectures.filter((a): a is string => typeof a === 'string')
+    : undefined
   return {
     name,
     author: latestRel.author ?? lib.author,
@@ -204,7 +219,9 @@ function normalizeLib(l: RawLib): LibPackage | null {
     installedVersion: l.library?.version ?? '',
     latestVersion: latestRel.version ?? versions[0] ?? lib.version ?? '',
     versions,
-    website: latestRel.website ?? lib.website
+    website: latestRel.website ?? lib.website,
+    providesIncludes: provides,
+    architectures: archs
   }
 }
 
@@ -237,6 +254,16 @@ export async function libInstalled(): Promise<LibPackage[]> {
 
 // ---- streamed operations (install / uninstall / update-index) --------------
 
+// Notified when a streamed package op finishes (install/uninstall/update-index),
+// i.e. when the installed set may have changed on disk. Wired by main/index.ts
+// to environmentService.invalidate so the dependency cache is dropped exactly at
+// completion, not at op start. A callback (not an import) keeps packageService
+// free of a dependency cycle with environmentService.
+let onPackagesChanged: (() => void) | null = null
+export function setOnPackagesChanged(cb: () => void): void {
+  onPackagesChanged = cb
+}
+
 /** Run an arduino-cli command, streaming its output to the Output panel. */
 function stream(win: BrowserWindow, id: string, args: string[]): void {
   runner.sendRunOutput(win, id, 'system', `$ ${CLI} ${args.join(' ')}\n`)
@@ -263,6 +290,8 @@ function stream(win: BrowserWindow, id: string, args: string[]): void {
     const durationMs = Math.round(performance.now() - start)
     if (code === 0) runner.sendRunOutput(win, id, 'system', `Done in ${durationMs}ms\n`)
     runner.sendRunExit(win, { id, code, signal, durationMs, phase: 'run' })
+    // The installed package set may have changed; let the environment cache know.
+    onPackagesChanged?.()
   })
 }
 

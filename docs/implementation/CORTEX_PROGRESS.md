@@ -3,6 +3,43 @@
 Newest first. One entry per completed slice: what shipped, how it was verified,
 and what it unblocks. See `CORTEX_IMPLEMENTATION_PLAN.md` for the full plan.
 
+## Intelligent Dependency & Environment System: the Environment panel (Stage 2)
+
+Made the Stage-1 report real and visible. `arduino-cli lib list` exposes
+`provides_includes` per installed library (verified: ESP32Servo advertises 5
+headers), so `packageService.normalizeLib` now surfaces it (and architectures)
+on `LibPackage`. A new gatherer, `environmentService.ts`, composes the derived
+project model + installed cores/libraries + the selected board + arduino-cli
+availability into the reconcile input and returns the report over a new
+`ENV_INSPECT` IPC channel (workspace-confined like the project-model build); the
+slow installed-package reads are cached with a single-flight guard. A new
+Environment sidebar panel (activity-bar rail + command palette) renders the
+report on the HardwarePanel read-only-analysis template: board/core status,
+Diagnostics (evidence-based findings with install actions), per-header
+Dependencies (resolved with provider+version / toolchain / unverified, each
+click-to-source), and available Updates with risk. Installs/updates go through
+the existing gated, streamed `runPackageOp` path.
+
+Verified live end to end against the real arduino-cli 1.5.1 (esp32:esp32 3.3.11;
+ESP32Servo + DHT installed): the panel shows core installed, resolves
+`ESP32Servo.h` -> ESP32Servo and `DHT.h` -> DHT sensor library, marks `Wire.h`
+toolchain and a missing header / `<vector>` unverified.
+
+A 2-dimension adversarial review (9 agents) confirmed four findings, all fixed.
+The major one was a freshness-timing bug (self-inflicted by a first-pass
+renderer stale-flag that cleared before an install landed, so watching an
+install mid-flight left the report stale): replaced with cache invalidation at
+op COMPLETION, driven from `packageService`'s stream-close via a callback wired
+in main to `environmentService.invalidate` (no import cycle), plus the panel
+re-inspecting on any op completion regardless of which panel started it, and a
+latest-wins seq guard + service single-flight against concurrent inspects. The
+minors: the update-index path now invalidates too; the panel no longer
+misattributes an unrelated op's completion to a dropped install (removed the
+pending ref, added a call-time running guard); and the library-level
+"unverified" explanation is now surfaced in Diagnostics, not dropped. Live
+re-verified; unit tests extended (packageService provides_includes guard,
+workspaceReset guard); typecheck and full suite green.
+
 ## Intelligent Dependency & Environment System: foundation (Stage 1)
 
 Kicked off the initiative to turn package handling from a thin arduino-cli UI

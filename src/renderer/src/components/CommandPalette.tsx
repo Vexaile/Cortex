@@ -99,6 +99,7 @@ export default function CommandPalette({ mode, onClose }: { mode: PaletteMode; o
       { key: 'search', label: 'View: Search', run: () => s.setSidebar('search') },
       { key: 'boards', label: 'View: Boards Manager', run: () => s.setSidebar('boards') },
       { key: 'libraries', label: 'View: Library Manager', run: () => s.setSidebar('libraries') },
+      { key: 'environment', label: 'View: Environment (Dependencies)', run: () => s.setSidebar('environment') },
       { key: 'debug', label: 'View: Debug', run: () => s.setSidebar('debug') },
       { key: 'devices', label: 'View: Serial & Devices', run: () => s.setSidebar('serial') },
       { key: 'settings', label: 'View: Settings', run: () => s.setSidebar('settings') },

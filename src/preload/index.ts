@@ -37,6 +37,7 @@ import type {
   AgentEvent
 } from '../shared/ipc'
 import type { LspCall, LspAvailability, LspDiagnosticsPush, LspServerExit, LspBusy } from '../shared/lsp'
+import type { EnvironmentReport } from '../shared/environment'
 
 type Unsub = () => void
 
@@ -85,6 +86,8 @@ const api = {
   setProjectConfig: (root: string, patch: ProjectConfig): Promise<ProjectConfig> =>
     ipcRenderer.invoke(IPC.PROJECT_CONFIG_SET, root, patch),
   buildProjectModel: (root: string): Promise<ProjectModel | null> => ipcRenderer.invoke(IPC.PROJECT_MODEL_BUILD, root),
+  envInspect: (root: string, fqbn: string | null, refresh?: boolean): Promise<EnvironmentReport | null> =>
+    ipcRenderer.invoke(IPC.ENV_INSPECT, root, fqbn, refresh),
 
   // embedded boards
   boardStatus: (): Promise<BoardStatus> => ipcRenderer.invoke(IPC.BOARD_STATUS),

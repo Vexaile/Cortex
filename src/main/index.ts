@@ -24,6 +24,7 @@ import * as ai from './services/aiService'
 import type { AiRequest } from './services/aiService'
 import * as projectConfig from './services/projectConfigService'
 import * as projectModel from './services/projectModelService'
+import * as environment from './services/environmentService'
 import * as embedded from './services/embeddedService'
 import * as pkg from './services/packageService'
 import * as debug from './services/debugService'
@@ -634,6 +635,13 @@ function registerIpc(): void {
     fsService.withinWorkspace(root) ? projectModel.buildProjectModel(root) : Promise.resolve(null)
   )
 
+  // ---- environment / dependency intelligence ----
+  // root drives buildProjectModel (a workspace read), so confine it as the
+  // project-model build is. fqbn is a board identifier, not a path.
+  ipcMain.handle(IPC.ENV_INSPECT, (_e, root: string, fqbn: string | null, refresh?: boolean) =>
+    fsService.withinWorkspace(root) ? environment.inspect(root, fqbn, !!refresh) : Promise.resolve(null)
+  )
+
   // ---- embedded boards ----
   ipcMain.handle(IPC.BOARD_STATUS, () => embedded.status())
   ipcMain.handle(IPC.BOARD_LIST_CONNECTED, () => embedded.listConnected())
@@ -701,6 +709,10 @@ app.whenReady().then(() => {
       })
     })
   }
+
+  // A completed core/lib install/uninstall/update-index changes the installed
+  // set, so drop the environment cache; the next inspect re-reads it.
+  pkg.setOnPackagesChanged(() => environment.invalidate())
 
   registerIpc()
   createWindow()

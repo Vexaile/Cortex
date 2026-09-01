@@ -80,6 +80,7 @@ const WORKSPACE_SCOPED = [
   'output',
   'diagnostics',
   'selectedFqbn',
+  'environmentReport',
   'serialLines',
   'serialCarry',
   'serialError',

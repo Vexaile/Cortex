@@ -39,6 +39,11 @@ export const IPC = {
   // Derived project model: languages, board/platform, GPIO usage
   PROJECT_MODEL_BUILD: 'project:modelBuild',
 
+  // Intelligent Dependency & Environment System: reconcile what the project
+  // uses against what is installed + the selected board into an evidence-based
+  // report (invoke -> EnvironmentReport | null).
+  ENV_INSPECT: 'env:inspect',
+
   // Embedded boards (arduino-cli / PlatformIO): ESP32, RP2040, AVR/Arduino, ...
   BOARD_STATUS: 'board:status', // is arduino-cli available?
   BOARD_LIST_CONNECTED: 'board:listConnected',
@@ -406,6 +411,12 @@ export interface LibPackage {
   latestVersion: string
   versions: string[] // installable versions, newest first
   website?: string
+  /** Headers this library provides (`lib list` provides_includes); the
+   *  Intelligent Dependency System resolves an #include to its providing
+   *  library through this. Empty for `lib search` results and older CLIs. */
+  providesIncludes?: string[]
+  /** Architectures the library declares support for (e.g. ["esp32"] or ["*"]). */
+  architectures?: string[]
 }
 
 /** Install a specific core/library version (blank version = latest). */

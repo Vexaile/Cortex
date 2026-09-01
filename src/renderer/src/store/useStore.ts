@@ -20,6 +20,7 @@ import type {
 } from '@shared/ipc'
 import { langFromPath, isHeaderPath, cDriver, cppDriver, type LanguageDef } from '@shared/languages'
 import { normalizeEol, detectEol, withEol } from '@shared/diff'
+import type { EnvironmentReport } from '@shared/environment'
 import type { LspAvailability } from '@shared/lsp'
 import type { DebugState, DebugOutput } from '@shared/ipc'
 
@@ -175,6 +176,8 @@ export function workspaceScopedReset(): Record<string, unknown> {
     diagnostics: [],
     // board target is per project (.cortex/config.json)
     selectedFqbn: '',
+    // Derived from the old project's includes + board; re-inspected on demand.
+    environmentReport: null,
     // The agent transcript, staged edits, and conversation all reference the old
     // project's files, so a switch must not carry them (and any in-flight run's
     // events are dropped once agentRunId is cleared).
@@ -314,6 +317,7 @@ export type SidebarView =
   | 'boards'
   | 'libraries'
   | 'hardware'
+  | 'environment'
   | 'debug'
   | 'serial'
   | 'ai'
@@ -322,6 +326,10 @@ export type BottomView = 'output' | 'serial' | 'problems' | 'terminal'
 
 let runCounter = 0
 const nextRunId = (): string => `run-${++runCounter}`
+
+// Latest-wins guard for environment inspects: a slow earlier inspect must not
+// clobber the report of a newer one (e.g. after a board change).
+let envInspectSeq = 0
 /** Set when an upload closed the serial monitor, so we can reopen it after. */
 let reopenSerialAfterUpload = false
 
@@ -436,6 +444,8 @@ interface State {
 
   // embedded boards
   boardStatus: BoardStatus | null
+  environmentReport: EnvironmentReport | null
+  envLoading: boolean
   boards: BoardPort[]
   boardTargets: BoardTarget[]
   selectedFqbn: string
@@ -566,6 +576,7 @@ interface State {
 
   // embedded boards
   refreshBoardStatus: () => Promise<void>
+  inspectEnvironment: (refresh?: boolean) => Promise<void>
   refreshBoards: () => Promise<void>
   refreshBoardTargets: () => Promise<void>
   setFqbn: (fqbn: string) => void
@@ -756,6 +767,8 @@ export const useStore = create<State>((set, get) => ({
   boardStatus: null,
   boards: [],
   boardTargets: [],
+  environmentReport: null,
+  envLoading: false,
   selectedFqbn: '',
 
   ports: [],
@@ -1826,6 +1839,26 @@ export const useStore = create<State>((set, get) => ({
       // Without this the dropdown never lists installed cores and always falls
       // back to the small hardcoded COMMON_BOARDS list.
       void get().refreshBoardTargets()
+    }
+  },
+
+  async inspectEnvironment(refresh = false) {
+    const root = get().workspaceRoot
+    if (!root) {
+      set({ environmentReport: null })
+      return
+    }
+    const seq = ++envInspectSeq
+    set({ envLoading: true })
+    try {
+      const report = await window.api.envInspect(root, get().selectedFqbn || null, refresh)
+      // Apply only if still the latest inspect, so a slower earlier run cannot
+      // overwrite a newer report.
+      if (seq === envInspectSeq) set({ environmentReport: report })
+    } catch {
+      if (seq === envInspectSeq) set({ environmentReport: null })
+    } finally {
+      if (seq === envInspectSeq) set({ envLoading: false })
     }
   },
   async refreshBoards() {
