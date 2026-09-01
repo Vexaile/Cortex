@@ -227,7 +227,7 @@ export default function EditorArea(): JSX.Element {
 
   if (tabs.length === 0) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col bg-ide-bg">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-ide-border bg-ide-bg">
         <div className="h-9 shrink-0 border-b border-ide-border bg-ide-panel" />
         <div className="min-h-0 flex-1">
           <EmptyState icon={<FileCode2 size={24} />}>
@@ -241,7 +241,10 @@ export default function EditorArea(): JSX.Element {
   return (
     // Plain flex (align-items: stretch), not the `row` utility, so the panes
     // fill the full height instead of centering.
-    <div ref={containerRef} className="flex min-h-0 flex-1">
+    <div
+      ref={containerRef}
+      className="flex min-h-0 flex-1 overflow-hidden rounded-lg border border-ide-border"
+    >
       {pane(0)}
       {split && <Splitter dir="x" title="Resize editor split" onDelta={onSplitterDelta} />}
       {split && pane(1)}

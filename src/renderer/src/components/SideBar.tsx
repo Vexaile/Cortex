@@ -15,7 +15,10 @@ export default function SideBar(): JSX.Element {
   const width = useStore((s) => s.sidebarWidth)
 
   return (
-    <div className="flex shrink-0 flex-col bg-ide-panel" style={{ width }}>
+    <div
+      className="flex shrink-0 flex-col overflow-hidden rounded-lg border border-ide-border bg-ide-panel"
+      style={{ width }}
+    >
       {view === 'explorer' && <FileExplorer />}
       {view === 'search' && <SearchPanel />}
       {view === 'boards' && <BoardsManagerPanel />}

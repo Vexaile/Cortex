@@ -67,7 +67,7 @@ export default function SimulatorView(): JSX.Element {
   }, [simWiring, cancelWire])
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-ide-bg">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-ide-border bg-ide-bg">
       {/* h-9 matches the editor tab bar and the AI panel header, so the top rule
           lines up when switching views (h-11 shifted it 8px). */}
       {/* cq: below the threshold every label here drops to its icon. Truncating

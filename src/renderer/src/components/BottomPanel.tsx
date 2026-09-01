@@ -37,7 +37,10 @@ export default function BottomPanel(): JSX.Element {
   }
 
   return (
-    <div className="flex shrink-0 flex-col bg-ide-panel" style={{ height: bottomHeight }}>
+    <div
+      className="flex shrink-0 flex-col overflow-hidden rounded-lg border border-ide-border bg-ide-panel"
+      style={{ height: bottomHeight }}
+    >
       {/* A narrow panel must never make a tab unreachable. Without nowrap the
           "Serial Monitor" label wrapped to two lines and broke the bar height,
           and Problems was clipped away entirely at 1000px wide. */}

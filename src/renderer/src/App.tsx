@@ -239,35 +239,41 @@ export default function App(): JSX.Element {
       <TitleBar />
       <div className="flex min-h-0 flex-1">
         <ActivityBar />
-        {sidebarVisible && (
-          <>
-            <SideBar />
-            <Splitter dir="x" title="Resize sidebar" onDelta={(d) => setSidebarWidth(sidebarWidth + d)} />
-          </>
-        )}
-        <div className="flex min-w-0 flex-1 flex-col">
-          {mainView === 'simulator' ? (
-            <SimulatorView />
-          ) : workspaceRoot ? (
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              <EditorArea />
-              {bottomVisible && (
-                <>
-                  <Splitter dir="y" title="Resize panel" onDelta={(d) => setBottomHeight(bottomHeight - d)} />
-                  <BottomPanel />
-                </>
-              )}
-            </div>
-          ) : (
-            <Welcome />
+        {/* Framed "island" workspace: the tool panels float as rounded cards on
+            the ide-bg field, separated by a consistent gutter. The splitters
+            live in those gutters, so a resize handle reads as the seam between
+            two islands rather than a third panel. */}
+        <div className="flex min-h-0 min-w-0 flex-1 gap-2 p-2">
+          {sidebarVisible && (
+            <>
+              <SideBar />
+              <Splitter dir="x" title="Resize sidebar" onDelta={(d) => setSidebarWidth(sidebarWidth + d)} />
+            </>
+          )}
+          <div className="flex min-w-0 flex-1 flex-col">
+            {mainView === 'simulator' ? (
+              <SimulatorView />
+            ) : workspaceRoot ? (
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
+                <EditorArea />
+                {bottomVisible && (
+                  <>
+                    <Splitter dir="y" title="Resize panel" onDelta={(d) => setBottomHeight(bottomHeight - d)} />
+                    <BottomPanel />
+                  </>
+                )}
+              </div>
+            ) : (
+              <Welcome />
+            )}
+          </div>
+          {aiVisible && (
+            <>
+              <Splitter dir="x" title="Resize AI panel" onDelta={(d) => setAiWidth(aiWidth - d)} />
+              <AiPanel />
+            </>
           )}
         </div>
-        {aiVisible && (
-          <>
-            <Splitter dir="x" title="Resize AI panel" onDelta={(d) => setAiWidth(aiWidth - d)} />
-            <AiPanel />
-          </>
-        )}
       </div>
       <StatusBar />
     </div>

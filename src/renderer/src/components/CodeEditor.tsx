@@ -303,7 +303,24 @@ export default function CodeEditor({ path }: { path: string }): JSX.Element {
         editor.onDidFocusEditorText(() => {
           w.__cortexEditor = editor
         })
+        // Monaco's automaticLayout observes the editor's own node, which it pins
+        // to its measured size. Inside the framed flex "island" the container
+        // mounts collapsed and grows a few frames later, so automaticLayout locks
+        // onto the tiny size and never recovers (the editor stays ~5x5). Observe
+        // the real container instead and relayout on any size change; a
+        // ResizeObserver also delivers the current size on observe, so this fixes
+        // the initial mount as well as later splitter/window resizes.
+        const container = editor.getContainerDomNode()
+        const ro = new ResizeObserver(() => {
+          try {
+            editor.layout()
+          } catch {
+            /* editor disposed between frames */
+          }
+        })
+        if (container) ro.observe(container)
         editor.onDidDispose(() => {
+          ro.disconnect()
           if (w.__cortexEditor === editor) delete w.__cortexEditor
         })
         editor.addCommand(m.KeyMod.CtrlCmd | m.KeyCode.KeyS, () => void saveActive())
@@ -333,6 +350,10 @@ export default function CodeEditor({ path }: { path: string }): JSX.Element {
         tabSize: 2,
         automaticLayout: true,
         scrollBeyondLastLine: false,
+        // The editor now lives in an overflow-hidden framed "island" (EditorArea
+        // card). Portal the suggest/hover/parameter-hint widgets out to a fixed
+        // layer so they are not clipped at the card edge near the last line.
+        fixedOverflowWidgets: true,
         // Off so dropping an editor tab onto a pane cannot paste the dragged
         // file's path into the document (the tab drag uses a custom mime, this
         // is belt-and-suspenders).

@@ -89,7 +89,10 @@ export default function AiPanel(): JSX.Element {
   }
 
   return (
-    <div className="flex shrink-0 flex-col bg-ide-panel" style={{ width: aiWidth }}>
+    <div
+      className="flex shrink-0 flex-col overflow-hidden rounded-lg border border-ide-border bg-ide-panel"
+      style={{ width: aiWidth }}
+    >
       <PanelHeader
         icon={<Sparkles size={14} className="text-ide-accent" />}
         actions={

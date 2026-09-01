@@ -81,7 +81,7 @@ export default function Welcome(): JSX.Element {
   return (
     // No items-center: centering a taller-than-container child splits the
     // overflow both ways and makes the top unscrollable/unreachable.
-    <div className="flex-1 overflow-auto bg-ide-bg p-8">
+    <div className="flex-1 overflow-auto rounded-lg border border-ide-border bg-ide-bg p-8">
       <div className="mx-auto w-full max-w-2xl">
         <div className="mb-1 flex items-center gap-3">
           <div className="grid h-11 w-11 place-items-center rounded-xl bg-cortex-gradient shadow-lg shadow-ide-navy/30">
