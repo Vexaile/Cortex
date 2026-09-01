@@ -1,0 +1,86 @@
+# Cortex IDE UI/UX Rework — Plan of Record
+
+A staged rework toward a professional embedded-engineering IDE (CLion / VS Code /
+Arduino-grade information architecture) while keeping Cortex's own identity
+(hardware-first, AI-native). Driven as an autonomous `/loop`: one shipped slice
+per iteration — plan → implement → typecheck + test + build → live-verify (CDP on
+:9222) → adversarial review workflow → fix → commit + push → tick this doc → next.
+
+This is the living checklist. Each phase lists the concrete audit findings it
+closes (from the `cortex-ui-audit` workflow, 2026-09-01).
+
+## Current-state facts (audit)
+
+- Shell (App.tsx): `TitleBar → [ActivityBar | SideBar? | main(EditorArea + BottomPanel) | AiPanel?] → StatusBar`. Panels are flush (no framed islands). No right-edge rail; the AI panel is a left-rail-toggled right panel. Splitters resize sidebar/ai/bottom.
+- Theme: a real semantic token set exists (`ide-*` in tailwind.config.js, documented in docs/THEME.md) and is used consistently (audit found ZERO raw non-ide color classes). Only ONE theme (Cortex Dark); a persisted `theme: 'dark'|'light'` field is dead.
+- Dialogs: destructive confirms use native `window.confirm` (FileExplorer delete, close-tab discard) and `dialog.showMessageBox` (main). The About modal (MenuBar) is fully themed and is the template.
+- Build config (compiler / std / optimization / rust edition) lives crammed in the 36px `TitleBar`, next to Run/Verify/Upload/Debug/board/serial — NOT in Settings. It is per-project (ProjectConfig) but has no home in a settings surface.
+- Settings (SettingsPanel) is a flat single scroll boxed in the ~256px sidebar; no scope separation, no search; mixes editable settings with a read-only tool-detection report; omits `theme` and `serial.baudRate`.
+- Renderer is clean of dead affordances except: a permanently-disabled "coming soon" on-chip Debug button in the sketch toolbar; a static `<span>UTF-8</span>` in the status bar; DebugPanel transport controls shown disabled (no reason) when idle.
+
+## Design principles
+
+- Honesty: every control works, is honestly disabled with a reason, or is absent. No blueprint/implementation-leak strings; no fake capability.
+- One concept, one home. Context over chrome (surfaces adapt to the task).
+- Progressive disclosure: beginner-clear by default, advanced available.
+- Build on the existing `ide-*` token system; add a Light theme and a small set of elevation/surface tokens rather than scattering literals.
+- Keep Cortex identity: Hardware / Simulator / Datasheets / Environment / Agent are first-class, not bolted on.
+
+## Central terminology (product language, not implementation)
+
+`arduino-cli` → "board tools" / "board support". `N toolchains` → "C++ · ESP32"
+(language · board). `platformio.ini` → (do not surface; Cortex is FQBN-based).
+raw `-O0/-Os` → Debug / Balanced / Release / Size. raw `g++/clang++` → GCC / Clang
+(binary as tooltip). `gdb` → "the debugger" / "Debug". `provider` → "AI model".
+`safeStorage` / `main process` → "your OS secure storage" / "your machine".
+`toolchains` (menu/palette/settings) → "Build" / "Compilers". `.cortex/diagram.json`
+→ "saved with the sketch". `stdin` → "Input". A central `src/shared/strings.ts`
+(or renderer strings module) holds shared labels so they do not drift.
+
+## Phases
+
+### Phase 1 — Audit + plan  ✅ (this doc)
+
+### Phase 2 — Design-system foundation
+- Themed `Dialog` + `ConfirmDialog` primitive (ide-* tokens, focus trap, Esc/Enter, danger variant). Replace `window.confirm` at FileExplorer delete + close-tab discard [audit HIGH]. Route the main-process close/exit confirm through it too.
+- Cortex **Light** theme: redefine `ide-*` tokens under `:root[data-theme=light]`; a real theme switch (Settings + status/toolbar); remove/relabel the dead `theme` field [audit MEDIUM]. Add surface/elevation tokens for framed panels.
+- Framed rounded "island" panels: padding + gaps + rounded corners + subtle borders in the shell (App.tsx layout), matching the reference density without cloning it.
+
+### Phase 3 — Shell chrome
+- Split the top bar: a slim **title/menu bar** (app mark, menus, project · target breadcrumb, window controls) and, on the right, **Search · Settings · Cortex Agent · Notifications** icon cluster.
+- Move build config OUT of the title bar into a **Target/Environment selector** (`ESP32 DevKit · Arduino · Debug`) that opens a config popover [audit HIGH: overloaded title bar, scope confusion].
+- A dedicated run toolbar row: `[Target ▾]  Build · Run ▸ · Debug ◉ · Serial Monitor · Serial Plotter`, build-state aware. Errors link to Problems.
+
+### Phase 4 — Tool rails + tool-window model
+- Left rail: primary tools + a "More tools" overflow (declutter), plus a bottom group (Terminal / Problems / Version Control) so the terminal etc. are one click away.
+- New **right-edge rail** hosting Cortex Agent, Notifications, Datasheets [audit MEDIUM].
+- Dockable tool-window model: let bottom/right host any tool window; allow two visible at once; persist location [audit MEDIUM: single mutually-exclusive column].
+
+### Phase 5 — Status bar
+- Product-concept segments: project · git · target (`ESP32 · Arduino`) · build state · device/serial · language · encoding · line-endings · cursor. Grouped, clickable, information-dense but quiet. Kill the raw `N toolchains` and static `UTF-8` [audit HIGH/low].
+
+### Phase 6 — Settings redesign
+- Promote Settings to a full editor-area surface with a category nav + wide pane [audit HIGH: boxed in sidebar].
+- Scope separation: User (Appearance, Editor, Keymap, AI, board-manager URLs, defaults) · Project (the ProjectConfig build+board settings, read/write) · a read-only System/Diagnostics area (tool detection) [audit HIGH].
+- Settings search; surface `serial.baudRate`; wire theme; progressive disclosure of advanced build flags [audit MEDIUM].
+
+### Phase 7 — Terminology + dead-affordance purge
+- Apply the central terminology to all ~24 audit strings (StatusBar, Devices, TitleBar badge, Boards/Library search + empty states, Hardware, Debug panel/tooltips, Agent/AI copy, Settings, OutputConsole, TerminalPanel, palette/menu).
+- Remove the 3 dead affordances: hide the on-chip Debug "coming soon" button; remove/replace static `UTF-8`; render Debug transport controls only during a session.
+
+### Phase 8 — States + notifications
+- Real terminal first-run (no blueprint hints; a live prompt). Coherent empty / loading / error / disconnected / needs-setup / unsupported states across every surface, each answering what happened + what to do next.
+- Themed notifications/toast center with a small history (status-bar bell), so async success/failure stops hijacking the bottom panel [audit MEDIUM].
+
+### Phase 9 — Debugger first-class
+- Coherent layout: controls · Call Stack · Variables · Watches · Breakpoints · Threads/Tasks · Registers · Memory · Console. Honest empty state when idle; clear explanation when unavailable for a target.
+
+### Phase 10+ — Simulator as a dockable tool window (stop it consuming the editor) · Git surface (status/commit/push) · multi-project + recent projects + project templates · hardware graph contextual actions · datasheet contextual actions · agent context indicator · View menu + keymap · accessibility · performance · responsive (1366→2560) · final first-run regression pass.
+
+## Discipline
+
+Turbo loop per slice (plan → implement → test → review → fix → finalize) and
+Taste discipline for every visual/UX decision. Adversarial find→verify review
+workflow on each slice's diff before commit. No user-facing copy exposes
+implementation details. Do not regress performance. Update this doc's checkboxes
+as phases land.
