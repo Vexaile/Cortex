@@ -4,7 +4,6 @@ import BoardsManagerPanel from './BoardsManagerPanel'
 import LibraryManagerPanel from './LibraryManagerPanel'
 import HardwarePanel from './HardwarePanel'
 import EnvironmentPanel from './EnvironmentPanel'
-import DatasheetsPanel from './DatasheetsPanel'
 import DebugPanel from './DebugPanel'
 import DevicesPanel from './DevicesPanel'
 import SettingsPanel from './SettingsPanel'
@@ -25,7 +24,6 @@ export default function SideBar(): JSX.Element {
       {view === 'libraries' && <LibraryManagerPanel />}
       {view === 'hardware' && <HardwarePanel />}
       {view === 'environment' && <EnvironmentPanel />}
-      {view === 'datasheets' && <DatasheetsPanel />}
       {view === 'debug' && <DebugPanel />}
       {view === 'serial' && <DevicesPanel />}
       {view === 'settings' && <SettingsPanel />}

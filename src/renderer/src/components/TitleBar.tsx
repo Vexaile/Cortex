@@ -19,7 +19,7 @@ export default function TitleBar(): JSX.Element {
   const toggleAi = useStore((s) => s.toggleAi)
   const sidebarVisible = useStore((s) => s.sidebarVisible)
   const sidebarView = useStore((s) => s.sidebarView)
-  const aiVisible = useStore((s) => s.aiVisible)
+  const rightView = useStore((s) => s.rightView)
 
   const activeTab = tabs.find((t) => t.path === activePath)
   const settingsActive = sidebarVisible && sidebarView === 'settings'
@@ -70,7 +70,7 @@ export default function TitleBar(): JSX.Element {
         <button className={iconBtn(settingsActive)} onClick={() => setSidebar('settings')} title="Settings (Ctrl+,)">
           <Settings size={15} />
         </button>
-        <button className={iconBtn(aiVisible)} onClick={toggleAi} title="Cortex Agent">
+        <button className={iconBtn(rightView === 'agent')} onClick={toggleAi} title="Cortex Agent">
           <Sparkles size={15} />
         </button>
       </div>

@@ -6,10 +6,8 @@ import {
   Library,
   Network,
   PackageCheck,
-  FileText,
   Bug,
   Radio,
-  Sparkles,
   Settings,
   CircuitBoard,
   MoreHorizontal,
@@ -30,7 +28,6 @@ const PRIMARY: Item[] = [
   { view: 'search', icon: Search, label: 'Search' },
   { view: 'hardware', icon: Network, label: 'Hardware' },
   { view: 'environment', icon: PackageCheck, label: 'Environment' },
-  { view: 'datasheets', icon: FileText, label: 'Datasheets' },
   { view: 'serial', icon: Radio, label: 'Serial & Devices' }
 ]
 const MORE: Item[] = [
@@ -43,13 +40,11 @@ export default function ActivityBar(): JSX.Element {
   const sidebarView = useStore((s) => s.sidebarView)
   const sidebarVisible = useStore((s) => s.sidebarVisible)
   const mainView = useStore((s) => s.mainView)
-  const aiVisible = useStore((s) => s.aiVisible)
   const bottomView = useStore((s) => s.bottomView)
   const bottomVisible = useStore((s) => s.bottomVisible)
   const workspaceRoot = useStore((s) => s.workspaceRoot)
   const setSidebar = useStore((s) => s.setSidebar)
   const setMainView = useStore((s) => s.setMainView)
-  const toggleAi = useStore((s) => s.toggleAi)
   const setBottom = useStore((s) => s.setBottom)
   const openTerminal = useStore((s) => s.openTerminal)
   const toggleBottom = useStore((s) => s.toggleBottom)
@@ -150,14 +145,11 @@ export default function ActivityBar(): JSX.Element {
 
       {divider}
 
-      {/* Mode toggles: the Simulator swaps the whole main view, the Agent toggles
-          the assistant panel. */}
+      {/* The Simulator swaps the whole main view. The Agent and Datasheets are
+          right-side tools now and live on the right-edge rail. */}
       {railButton(mainView === 'simulator', 'Simulator', CircuitBoard, () =>
         setMainView(mainView === 'simulator' ? 'editor' : 'simulator')
       )}
-      {/* aiVisible is live state (sending a chat sets it), so without this the
-          panel could be open while its icon still read as off. */}
-      {railButton(aiVisible, 'Cortex Agent', Sparkles, toggleAi)}
 
       <div className="flex-1" />
 

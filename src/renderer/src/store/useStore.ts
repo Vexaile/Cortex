@@ -333,11 +333,15 @@ export type SidebarView =
   | 'libraries'
   | 'hardware'
   | 'environment'
-  | 'datasheets'
   | 'debug'
   | 'serial'
   | 'ai'
   | 'settings'
+
+// What the right dock shows. Datasheets and the Agent are reference/assist
+// surfaces that belong on the right, next to the editor; the right-edge rail
+// toggles between them (or hides the dock with null).
+export type RightView = 'agent' | 'datasheets' | null
 export type BottomView = 'output' | 'serial' | 'problems' | 'terminal'
 
 let runCounter = 0
@@ -455,7 +459,8 @@ interface State {
   sidebarVisible: boolean
   bottomView: BottomView
   bottomVisible: boolean
-  aiVisible: boolean
+  /** Which tool the right dock shows (Agent / Datasheets), or null when hidden. */
+  rightView: RightView
   sidebarWidth: number
   aiWidth: number
   bottomHeight: number
@@ -604,7 +609,10 @@ interface State {
   openTerminal: () => void
   toggleBottom: () => void
   setSerialPlot: (on: boolean) => void
+  /** Toggle the Agent in the right dock (kept as toggleAi for its many callers). */
   toggleAi: () => void
+  /** Show a tool in the right dock, or hide it when it is already showing. */
+  setRightView: (v: 'agent' | 'datasheets') => void
 
   // simulator
   startSim: () => Promise<void>
@@ -813,7 +821,16 @@ export const useStore = create<State>((set, get) => ({
   // JetBrains-style: the AI assistant is a tool window you opt into, not
   // something that claims editor width before you've asked for it. Remembered
   // per-machine after that, the same way its width already is.
-  aiVisible: lsBool('cortex.aiVisible', false),
+  rightView: ((): RightView => {
+    const v = localStorage.getItem('cortex.rightView')
+    if (v === 'agent' || v === 'datasheets') return v
+    // A stored value that is neither (the '' written on close) is an explicit
+    // "hidden" and must win, or a closed dock would never stick. Only when the
+    // key was never written do we fall back to the legacy aiVisible flag,
+    // carrying a previously-open AI panel over to the Agent dock.
+    if (v !== null) return null
+    return lsBool('cortex.aiVisible', false) ? 'agent' : null
+  })(),
   sidebarWidth: lsNum('cortex.sidebarWidth', 256),
   aiWidth: lsNum('cortex.aiWidth', 320),
   bottomHeight: lsNum('cortex.bottomHeight', 256),
@@ -1244,9 +1261,14 @@ export const useStore = create<State>((set, get) => ({
     set({ bottomVisible: !get().bottomVisible })
   },
   toggleAi() {
-    const v = !get().aiVisible
-    set({ aiVisible: v })
-    lsSetBool('cortex.aiVisible', v)
+    const v: RightView = get().rightView === 'agent' ? null : 'agent'
+    set({ rightView: v })
+    localStorage.setItem('cortex.rightView', v ?? '')
+  },
+  setRightView(v) {
+    const next: RightView = get().rightView === v ? null : v
+    set({ rightView: next })
+    localStorage.setItem('cortex.rightView', next ?? '')
   },
 
   async startSim() {
@@ -1727,7 +1749,7 @@ export const useStore = create<State>((set, get) => ({
 
   async sendChat(text, context) {
     const chat = [...get().chat, { role: 'user' as const, content: text }, { role: 'assistant' as const, content: '' }]
-    set({ chat, aiStreaming: true, aiVisible: true })
+    set({ chat, aiStreaming: true, rightView: 'agent' })
     const id = `ai-${performance.now()}`
     await window.api.aiComplete({
       id,
@@ -1764,7 +1786,7 @@ export const useStore = create<State>((set, get) => ({
       agentRunning: true,
       agentRunId: id,
       agentMessages: messages,
-      aiVisible: true,
+      rightView: 'agent',
       agentStatus: 'Thinking...',
       agentLog: [...get().agentLog, { type: 'user', text }]
     })

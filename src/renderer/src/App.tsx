@@ -11,6 +11,8 @@ import EditorArea from './components/EditorArea'
 import BottomPanel from './components/BottomPanel'
 import StatusBar from './components/StatusBar'
 import AiPanel from './components/AiPanel'
+import DatasheetsDock from './components/DatasheetsDock'
+import RightRail from './components/RightRail'
 import SimulatorView from './components/SimulatorView'
 import Welcome from './components/Welcome'
 import Splash from './components/Splash'
@@ -31,7 +33,7 @@ export default function App(): JSX.Element {
     mainView,
     sidebarVisible,
     bottomVisible,
-    aiVisible,
+    rightView,
     appendOutput,
     handleRunExit,
     handleDiagnostics,
@@ -273,13 +275,17 @@ export default function App(): JSX.Element {
               <Welcome />
             )}
           </div>
-          {aiVisible && (
+          {/* Right dock: the Agent or the Datasheets, whichever the right rail
+              selected. One splitter/width serves both. */}
+          {rightView && (
             <>
-              <Splitter dir="x" title="Resize AI panel" onDelta={(d) => setAiWidth(aiWidth - d)} />
-              <AiPanel />
+              <Splitter dir="x" title="Resize panel" onDelta={(d) => setAiWidth(aiWidth - d)} />
+              {rightView === 'agent' ? <AiPanel /> : <DatasheetsDock />}
             </>
           )}
         </div>
+        {/* The right-edge tool rail, flush to the window like the ActivityBar. */}
+        <RightRail />
       </div>
       <StatusBar />
     </div>
