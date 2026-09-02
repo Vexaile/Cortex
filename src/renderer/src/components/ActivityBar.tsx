@@ -8,6 +8,7 @@ import {
   PackageCheck,
   Bug,
   Radio,
+  GitBranch,
   Settings,
   CircuitBoard,
   MoreHorizontal,
@@ -28,7 +29,8 @@ const PRIMARY: Item[] = [
   { view: 'search', icon: Search, label: 'Search' },
   { view: 'hardware', icon: Network, label: 'Hardware' },
   { view: 'environment', icon: PackageCheck, label: 'Environment' },
-  { view: 'serial', icon: Radio, label: 'Serial & Devices' }
+  { view: 'serial', icon: Radio, label: 'Serial & Devices' },
+  { view: 'vcs', icon: GitBranch, label: 'Source Control' }
 ]
 const MORE: Item[] = [
   { view: 'boards', icon: Cpu, label: 'Boards Manager' },
@@ -152,9 +154,8 @@ export default function ActivityBar(): JSX.Element {
 
       {/* Bottom dock quick access: the tools you drop to while working. Shown
           only with a project open, since the dock renders only in the editor
-          view of a workspace. Version Control is intentionally absent until
-          there is a real Git surface (Phase 10) - a dead button would be worse
-          than none. */}
+          view of a workspace. (Source Control is a sidebar view in PRIMARY
+          above, next to the Explorer, the way VS Code places it.) */}
       {workspaceRoot && (
         <>
           {railButton(terminalActive, 'Terminal', Terminal, () => (terminalActive ? toggleBottom() : openTerminal()))}

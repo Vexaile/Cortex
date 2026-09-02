@@ -26,6 +26,9 @@ import type {
   DebugStartRequest,
   DebugState,
   DebugOutput,
+  GitStatus,
+  GitFileDiff,
+  GitDiffKind,
   SimStartRequest,
   SimEvent,
   SimExit,
@@ -135,6 +138,11 @@ const api = {
   debugSetBreakpoints: (file: string, lines: number[]): Promise<void> =>
     ipcRenderer.invoke(IPC.DEBUG_SET_BREAKPOINTS, file, lines),
   debugEvaluate: (expr: string): Promise<string> => ipcRenderer.invoke(IPC.DEBUG_EVALUATE, expr),
+
+  // version control (git), read-only
+  gitStatus: (): Promise<GitStatus> => ipcRenderer.invoke(IPC.GIT_STATUS),
+  gitDiff: (path: string, kind: GitDiffKind, orig?: string): Promise<GitFileDiff | null> =>
+    ipcRenderer.invoke(IPC.GIT_DIFF, path, kind, orig),
   onDebugState: (cb: (s: DebugState) => void): Unsub => on(IPC.DEBUG_STATE, cb),
   onDebugOutput: (cb: (o: DebugOutput) => void): Unsub => on(IPC.DEBUG_OUTPUT, cb),
 

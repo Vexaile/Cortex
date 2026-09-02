@@ -3,6 +3,9 @@
  * Channel names are centralized here so both sides stay in sync.
  */
 
+import type { GitFileStatus } from './gitStatus'
+export type { GitFileStatus }
+
 export const IPC = {
   // Dialogs / workspace
   DIALOG_OPEN_FOLDER: 'dialog:openFolder',
@@ -85,6 +88,10 @@ export const IPC = {
   DEBUG_SELECT_FRAME: 'debug:selectFrame',
   DEBUG_STATE: 'debug:state', // main -> renderer push
   DEBUG_OUTPUT: 'debug:output', // main -> renderer: program + gdb text
+
+  // Version control (git), read-only for now
+  GIT_STATUS: 'git:status',
+  GIT_DIFF: 'git:diff',
 
   // Simulator (Wokwi/Tinkercad-style native simulation)
   SIM_START: 'sim:start',
@@ -481,6 +488,35 @@ export interface DebugState {
 export interface DebugOutput {
   stream: 'program' | 'gdb' | 'system'
   text: string
+}
+
+// ---- Version control (git) ------------------------------------------------
+/** Working-tree status for the open workspace. `isRepo` is false when the
+ *  workspace is not a git repository; `error` is set when git IS a repo (or
+ *  git could not be run) but the status could not be read, so the panel never
+ *  fabricates a clean tree from a failure. Paths are repo-root-relative and
+ *  already confined to the open workspace. */
+export interface GitStatus {
+  isRepo: boolean
+  branch?: string
+  ahead: number
+  behind: number
+  files: GitFileStatus[]
+  error?: string
+}
+/** Which side of a file's change to diff, matching how the row is grouped. */
+export type GitDiffKind = 'staged' | 'unstaged' | 'untracked'
+/** One file's diff as two contents for the shared DiffView. The pair depends on
+ *  the kind: staged = HEAD (or the rename origin) vs the index; unstaged = the
+ *  index vs the working tree; untracked = empty vs the working tree. `binary` is
+ *  set when either side has a NUL byte; `directory` when the entry is a folder
+ *  (not line-diffable). */
+export interface GitFileDiff {
+  path: string
+  oldContent: string
+  newContent: string
+  binary: boolean
+  directory?: boolean
 }
 
 // ---- Simulator ------------------------------------------------------------

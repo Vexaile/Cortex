@@ -335,6 +335,7 @@ export type SidebarView =
   | 'environment'
   | 'debug'
   | 'serial'
+  | 'vcs'
   | 'ai'
 
 // What the right dock shows. Datasheets and the Agent are reference/assist

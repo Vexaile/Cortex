@@ -12,7 +12,8 @@ import type {
   PackageInstallRequest,
   SearchQuery,
   DebugStartRequest,
-  SimStartRequest
+  SimStartRequest,
+  GitDiffKind
 } from '../shared/ipc'
 import * as fsService from './services/fsService'
 import * as search from './services/searchService'
@@ -30,6 +31,7 @@ import * as datasheet from './services/datasheetService'
 import * as embedded from './services/embeddedService'
 import * as pkg from './services/packageService'
 import * as debug from './services/debugService'
+import * as git from './services/gitService'
 import * as sim from './services/simService'
 import * as lsp from './services/lspService'
 import * as terminal from './services/terminalService'
@@ -713,6 +715,10 @@ function registerIpc(): void {
   ipcMain.handle(IPC.DEBUG_SELECT_FRAME, (_e, level: number) => debug.selectFrame(level))
   ipcMain.handle(IPC.DEBUG_SET_BREAKPOINTS, (_e, file: string, lines: number[]) => debug.setBreakpoints(file, lines))
   ipcMain.handle(IPC.DEBUG_EVALUATE, (_e, expr: string) => debug.evaluate(expr))
+
+  // ---- version control (git), read-only ----
+  ipcMain.handle(IPC.GIT_STATUS, () => git.status())
+  ipcMain.handle(IPC.GIT_DIFF, (_e, path: string, kind: GitDiffKind, orig?: string) => git.fileDiff(path, kind, orig))
 
   // ---- settings / app ----
   // Return redacted settings only: the raw API key never crosses to the renderer.
