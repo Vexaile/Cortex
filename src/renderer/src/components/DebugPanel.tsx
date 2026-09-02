@@ -117,15 +117,20 @@ export default function DebugPanel(): JSX.Element {
       <PanelHeader
         icon={<Bug size={13} />}
         actions={
-          <div className="row gap-0.5">
-            {running
-              ? ctrl(Pause, 'Pause', debugPause, true)
-              : ctrl(Play, 'Continue', debugContinue, stopped)}
-            {ctrl(StepForward, 'Step Over', debugStepOver, stopped)}
-            {ctrl(ArrowDownToLine, 'Step Into', debugStepInto, stopped)}
-            {ctrl(ArrowUpFromLine, 'Step Out', debugStepOut, stopped)}
-            {ctrl(Square, 'Stop', stopDebug, active)}
-          </div>
+          // Only during a session: a row of greyed-out transport buttons when
+          // idle is a dead affordance. The idle state's "Start Debugging" below
+          // is the real entry point.
+          active ? (
+            <div className="row gap-0.5">
+              {running
+                ? ctrl(Pause, 'Pause', debugPause, true)
+                : ctrl(Play, 'Continue', debugContinue, stopped)}
+              {ctrl(StepForward, 'Step Over', debugStepOver, stopped)}
+              {ctrl(ArrowDownToLine, 'Step Into', debugStepInto, stopped)}
+              {ctrl(ArrowUpFromLine, 'Step Out', debugStepOut, stopped)}
+              {ctrl(Square, 'Stop', stopDebug, active)}
+            </div>
+          ) : undefined
         }
       >
         Debug

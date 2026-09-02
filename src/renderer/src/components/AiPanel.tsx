@@ -120,7 +120,7 @@ export default function AiPanel(): JSX.Element {
           </div>
         }
       >
-        AI Assistant
+        Cortex Agent
       </PanelHeader>
 
       {agentMode ? (
@@ -133,7 +133,7 @@ export default function AiPanel(): JSX.Element {
           // give the one control that fixes it.
           <div className="space-y-3">
             <p className="text-[12px] leading-relaxed text-ide-muted">
-              The AI assistant is not connected yet.
+              Cortex Agent is not connected yet.
             </p>
             <p className="text-[11px] leading-relaxed text-ide-faint">
               Choose a provider and paste a key (Claude, OpenAI, Gemini), or point Cortex at a local

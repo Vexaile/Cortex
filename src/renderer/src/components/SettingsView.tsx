@@ -21,7 +21,7 @@ const CATEGORIES: { id: Category; label: string }[] = [
   { id: 'appearance', label: 'Appearance' },
   { id: 'build', label: 'Build' },
   { id: 'serial', label: 'Serial' },
-  { id: 'ai', label: 'AI' },
+  { id: 'ai', label: 'Cortex Agent' },
   { id: 'boards', label: 'Board Manager' },
   { id: 'diagnostics', label: 'Diagnostics' }
 ]

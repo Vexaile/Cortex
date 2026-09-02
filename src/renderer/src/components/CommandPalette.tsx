@@ -104,7 +104,7 @@ export default function CommandPalette({ mode, onClose }: { mode: PaletteMode; o
       { key: 'debug', label: 'View: Debug', run: () => s.setSidebar('debug') },
       { key: 'devices', label: 'View: Serial & Devices', run: () => s.setSidebar('serial') },
       { key: 'settings', label: 'View: Settings', run: () => s.setMainView('settings') },
-      { key: 'ai', label: 'View: Toggle AI Assistant', run: () => s.toggleAi() },
+      { key: 'ai', label: 'View: Toggle Cortex Agent', run: () => s.toggleAi() },
       { key: 'terminal', label: 'Terminal: Open', hint: 'Ctrl+`', run: () => s.openTerminal() },
       { key: 'panel', label: 'View: Toggle Bottom Panel', run: () => s.toggleBottom() },
       { key: 'sidebar', label: 'View: Toggle Sidebar', hint: 'Ctrl+B', run: () => s.toggleSidebar() },

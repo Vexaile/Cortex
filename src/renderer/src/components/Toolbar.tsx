@@ -6,8 +6,8 @@ import TargetSelect from './TargetSelect'
 
 /**
  * The run/build toolbar: the build Target selector for the active file, the
- * primary action buttons (Run / Stop, or the Arduino Verify / Upload / Debug
- * trio), the Board + Port selector, and Serial Monitor / Plotter. It lives on
+ * primary action buttons (Run / Stop, or the Arduino Verify / Upload pair),
+ * the Board + Port selector, and Serial Monitor / Plotter. It lives on
  * its own row below the title bar so build configuration is no longer crammed
  * into the window chrome. Build config is per-project (ProjectConfig) and lives
  * behind the Target selector (components/TargetSelect.tsx).
@@ -108,9 +108,9 @@ export default function Toolbar(): JSX.Element {
 
       <div className="flex-1" />
 
-      {/* Action buttons (Verify / Upload / Debug for a sketch; Run / Debug for
-          host code), then the Board + Port selector to their right the way
-          Arduino IDE lays it out. */}
+      {/* Action buttons (Verify / Upload for a sketch; Run / Debug for host
+          code), then the Board + Port selector to their right the way Arduino
+          IDE lays it out. */}
       <div className="flex shrink-0 items-center gap-1 pl-1">
         {running ? (
           <>
@@ -191,18 +191,10 @@ export default function Toolbar(): JSX.Element {
             >
               <UploadCloud size={16} />
             </button>
-            {/* Debug, third in the Arduino trio. On-chip firmware debug needs a
-                hardware probe + OpenOCD, so it is disabled with an honest reason
-                rather than silently doing nothing. */}
-            <button
-              className={`grid h-7 w-7 place-items-center rounded-full border border-ide-border bg-ide-bar text-ide-text transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-                boardsReady ? '' : 'hidden'
-              }`}
-              disabled
-              title="On-chip debugging needs a hardware debug probe (coming soon). Host C/C++ debugging works on plain .cpp files."
-            >
-              <Bug size={16} />
-            </button>
+            {/* No on-chip Debug button here: it needs a hardware probe + OpenOCD
+                that Cortex does not drive yet, and a permanently-disabled button
+                is worse than none. Host C/C++ debugging (the Debug button for a
+                plain .cpp) is real and lives in the non-sketch branch below. */}
           </>
         ) : (
           <>
