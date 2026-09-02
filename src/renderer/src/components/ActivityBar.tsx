@@ -56,14 +56,11 @@ export default function ActivityBar(): JSX.Element {
   // simulator, so without it Problems would stay lit while hidden and need two
   // clicks (the first would toggleBottom() a dock that is not on screen).
   const problemsActive = bottomVisible && bottomView === 'problems' && mainView === 'editor'
-  // Problems lives in the bottom dock, which only renders in the editor view, so
-  // route through the editor first the way openTerminal already does.
+  // Toggle Problems in the bottom dock. setBottom routes back to the editor view
+  // (the dock only renders there), so no separate mainView handling is needed.
   const showProblems = (): void => {
     if (problemsActive) toggleBottom()
-    else {
-      if (mainView === 'simulator') setMainView('editor')
-      setBottom('problems')
-    }
+    else setBottom('problems')
   }
 
   const [moreOpen, setMoreOpen] = useState(false)
@@ -166,7 +163,9 @@ export default function ActivityBar(): JSX.Element {
         </>
       )}
 
-      {railButton(sidebarVisible && sidebarView === 'settings', 'Settings', Settings, () => setSidebar('settings'))}
+      {railButton(mainView === 'settings', 'Settings', Settings, () =>
+        setMainView(mainView === 'settings' ? 'editor' : 'settings')
+      )}
     </div>
   )
 }

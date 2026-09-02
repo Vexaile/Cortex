@@ -60,10 +60,9 @@ raw `-O0/-Os` → Debug / Balanced / Release / Size. raw `g++/clang++` → GCC /
 ### Phase 5  -  Status bar ✅
 - Product-concept segments: project, build/run state, device/serial, board, LSP, language, line-endings, cursor position, unsaved. KILLED the raw `N toolchains` string (audit HIGH; Settings stays reachable via the title-bar cluster / left rail / Ctrl+,) and the static `UTF-8` (audit low). Line-endings are REAL (CRLF/LF from the file's own content, via the tested pure `src/shared/textInfo.ts`); cursor position (Ln/Col) is wired from Monaco through a new `cursorPos` store field, cleared when no editor is focused. git omitted (no Git surface). Target + Problems are intentionally NOT duplicated here - they live in the Toolbar (3b/3c). Encoding omitted rather than faked. Live-verified via CDP.
 
-### Phase 6  -  Settings redesign
-- Promote Settings to a full editor-area surface with a category nav + wide pane [audit HIGH: boxed in sidebar].
-- Scope separation: User (Appearance, Editor, Keymap, AI, board-manager URLs, defaults) · Project (the ProjectConfig build+board settings, read/write) · a read-only System/Diagnostics area (tool detection) [audit HIGH].
-- Settings search; surface `serial.baudRate`; wire theme; progressive disclosure of advanced build flags [audit MEDIUM].
+### Phase 6  -  Settings redesign (split into 6a / 6b)
+- **6a** ✅ Promoted Settings to a full editor-area surface (`components/SettingsView.tsx`, a framed island rendered on the new `mainView === 'settings'`) with a left category nav (Appearance / Build / AI / Board Manager / read-only Diagnostics) + a wide `max-w-2xl` content pane [audit HIGH: boxed in sidebar]. The old sidebar 'settings' view is retired (removed from SidebarView; SettingsPanel deleted); every entry point (rail, title bar, Ctrl+comma, palette, MenuBar x2, AI configure buttons) routes to `setMainView('settings')`; opening/focusing a file returns to the editor; the run toolbar hides in settings. All wiring preserved (theme, build defaults, AI incl. the main-process API key, board URLs, tool-detection rescan). Live-verified via CDP.
+- **6b** Settings search (filter categories/fields); surface `serial.baudRate`; progressive disclosure of the advanced `-O` levels the Target popover hides. (Scope separation into User/Project/System is folded here where it adds value; theme is already wired in 2b/6a.)
 
 ### Phase 7  -  Terminology + dead-affordance purge
 - Apply the central terminology to all ~24 audit strings (StatusBar, Devices, TitleBar badge, Boards/Library search + empty states, Hardware, Debug panel/tooltips, Agent/AI copy, Settings, OutputConsole, TerminalPanel, palette/menu).
@@ -77,6 +76,14 @@ raw `-O0/-Os` → Debug / Balanced / Release / Size. raw `g++/clang++` → GCC /
 - Coherent layout: controls · Call Stack · Variables · Watches · Breakpoints · Threads/Tasks · Registers · Memory · Console. Honest empty state when idle; clear explanation when unavailable for a target.
 
 ### Phase 10+  -  Simulator as a dockable tool window (stop it consuming the editor) · Git surface (status/commit/push) · multi-project + recent projects + project templates · hardware graph contextual actions · datasheet contextual actions · agent context indicator · View menu + keymap · accessibility · performance · responsive (1366→2560) · final first-run regression pass.
+
+## Known engineering debt (tracked)
+
+- Switching the main view (to the Simulator or, since 6a, to Settings) unmounts
+  and remounts the editor, so Monaco loses in-file undo history / scroll / cursor
+  (pre-existing for the Simulator; 6a adds Settings as a second trigger). Fix in
+  a later slice: keep EditorArea mounted and toggle visibility (`hidden`) instead
+  of swapping it out, so editor state survives a view switch.
 
 ## Known a11y debt (tracked, from the slice-2b review)
 

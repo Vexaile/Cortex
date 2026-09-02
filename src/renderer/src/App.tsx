@@ -14,6 +14,7 @@ import AiPanel from './components/AiPanel'
 import DatasheetsDock from './components/DatasheetsDock'
 import RightRail from './components/RightRail'
 import SimulatorView from './components/SimulatorView'
+import SettingsView from './components/SettingsView'
 import Welcome from './components/Welcome'
 import Splash from './components/Splash'
 
@@ -60,6 +61,7 @@ export default function App(): JSX.Element {
     openWorkspace,
     removeRecent,
     setSidebar,
+    setMainView,
     setBottom,
     setSerialPlot
   } = useStore()
@@ -196,9 +198,9 @@ export default function App(): JSX.Element {
           return undefined
         })
       } else if (mod && e.key === ',') {
-        // Settings (advertised in the File menu).
+        // Settings (advertised in the File menu): a full editor-area surface.
         e.preventDefault()
-        setSidebar('settings')
+        setMainView('settings')
       } else if (mod && !e.shiftKey && e.key.toLowerCase() === 't') {
         // Auto Format (advertised in the Sketch menu); real now that a
         // formatting provider is registered for C/C++/Rust.
@@ -211,7 +213,7 @@ export default function App(): JSX.Element {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [saveActive, toggleSidebar, toggleBottom, runActive, setSidebar, setBottom, setSerialPlot, openWorkspace])
+  }, [saveActive, toggleSidebar, toggleBottom, runActive, setSidebar, setMainView, setBottom, setSerialPlot, openWorkspace])
 
   // Closing the window used to just discard unsaved tabs. Main intercepts the
   // close once and waits here instead of dropping the window immediately, so
@@ -244,7 +246,7 @@ export default function App(): JSX.Element {
           Hidden on the Welcome screen (nothing to run) and in the Simulator
           (which carries its own Run/Stop), so it never shows a dead or
           duplicate control. */}
-      {workspaceRoot && mainView !== 'simulator' && <Toolbar />}
+      {workspaceRoot && mainView === 'editor' && <Toolbar />}
       <div className="flex min-h-0 flex-1">
         <ActivityBar />
         {/* Framed "island" workspace: the tool panels float as rounded cards on
@@ -261,6 +263,8 @@ export default function App(): JSX.Element {
           <div className="flex min-w-0 flex-1 flex-col">
             {mainView === 'simulator' ? (
               <SimulatorView />
+            ) : mainView === 'settings' ? (
+              <SettingsView />
             ) : workspaceRoot ? (
               <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
                 <EditorArea />

@@ -54,7 +54,7 @@ const COMPILED_LANGS = new Set(['cpp', 'c', 'rust'])
 
 export const isSketch = (path: string | null): boolean => !!path && path.toLowerCase().endsWith('.ino')
 
-export type MainView = 'editor' | 'simulator'
+export type MainView = 'editor' | 'simulator' | 'settings'
 
 /** Which board the 3D simulator view renders. A view preference, not project
  *  data, so it is not workspace-scoped. The engine still models an Uno. */
@@ -336,7 +336,6 @@ export type SidebarView =
   | 'debug'
   | 'serial'
   | 'ai'
-  | 'settings'
 
 // What the right dock shows. Datasheets and the Agent are reference/assist
 // surfaces that belong on the right, next to the editor; the right-edge rail
@@ -1051,8 +1050,8 @@ export const useStore = create<State>((set, get) => ({
     // (forward slashes, from gcc) focuses the existing tab instead of duplicating.
     const existing = tabs.find((t) => normPath(t.path) === normPath(path))
     if (existing) {
-      // Focus it in whichever group already holds it.
-      set(groupPatch(focusPathInGroups(get(), existing.path)))
+      // Focus it in whichever group already holds it, and show the editor.
+      set({ ...groupPatch(focusPathInGroups(get(), existing.path)), mainView: 'editor' })
       return
     }
     const read = await window.api.readFile(path)
@@ -1070,20 +1069,24 @@ export const useStore = create<State>((set, get) => ({
       // Activate the tab's OWN path string. Consumers look tabs up with strict
       // equality, so activating a differently-spelled path (gcc's forward
       // slashes vs the explorer's backslashes) would blank the editor pane.
-      set(groupPatch(focusPathInGroups(get(), raced.path)))
+      set({ ...groupPatch(focusPathInGroups(get(), raced.path)), mainView: 'editor' })
       return
     }
     // addTab assigns the tab to (and focuses) whichever group is active, so a
     // file opened while the right pane has focus opens there.
-    set(
-      groupPatch(
+    set({
+      ...groupPatch(
         addTabToGroups(get(), { path, name: baseName(path), content, savedContent: content, language: langFromPath(path), readOnlyReason })
-      )
-    )
+      ),
+      // Opening a file shows it: leave the Settings surface / Simulator.
+      mainView: 'editor'
+    })
   },
 
   setActive(path) {
-    set(groupPatch(focusPathInGroups(get(), path)))
+    // Focusing a file returns to the editor: a file click from the explorer
+    // while the Settings surface (or the Simulator) is up should show the file.
+    set({ ...groupPatch(focusPathInGroups(get(), path)), mainView: 'editor' })
   },
   setCursor(pos) {
     // Skip no-op writes so a click that lands on the same spot does not churn
@@ -1257,7 +1260,12 @@ export const useStore = create<State>((set, get) => ({
     set({ serialPlot: on })
   },
   setBottom(v) {
-    set({ bottomView: v, bottomVisible: true })
+    // The bottom dock only renders in the editor view, so every entry point that
+    // reveals a dock tab (rail Problems, the serial accelerator, the toolbar
+    // chips) must leave the Settings surface / Simulator first, the way
+    // openTerminal already does - otherwise the click silently flips state with
+    // nothing on screen.
+    set({ mainView: 'editor', bottomView: v, bottomVisible: true })
   },
   openTerminal() {
     // The bottom dock (and the terminal) only render in the editor view of an

@@ -103,7 +103,7 @@ export default function CommandPalette({ mode, onClose }: { mode: PaletteMode; o
       { key: 'datasheets', label: 'View: Datasheets (Documents)', run: () => s.setRightView('datasheets') },
       { key: 'debug', label: 'View: Debug', run: () => s.setSidebar('debug') },
       { key: 'devices', label: 'View: Serial & Devices', run: () => s.setSidebar('serial') },
-      { key: 'settings', label: 'View: Settings', run: () => s.setSidebar('settings') },
+      { key: 'settings', label: 'View: Settings', run: () => s.setMainView('settings') },
       { key: 'ai', label: 'View: Toggle AI Assistant', run: () => s.toggleAi() },
       { key: 'terminal', label: 'Terminal: Open', hint: 'Ctrl+`', run: () => s.openTerminal() },
       { key: 'panel', label: 'View: Toggle Bottom Panel', run: () => s.toggleBottom() },

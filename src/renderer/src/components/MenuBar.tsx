@@ -138,7 +138,7 @@ export default function MenuBar(): JSX.Element {
         { label: 'Save', hint: 'Ctrl+S', disabled: !hasFile, onClick: () => void s.saveActive() },
         { label: 'Save All', disabled: s.tabs.length === 0, onClick: () => void s.saveAll() },
         { sep: true },
-        { label: 'Settings', hint: 'Ctrl+,', onClick: () => s.setSidebar('settings') },
+        { label: 'Settings', hint: 'Ctrl+,', onClick: () => s.setMainView('settings') },
         { sep: true },
         { label: 'Quit', onClick: () => window.close() }
       ]
@@ -190,7 +190,7 @@ export default function MenuBar(): JSX.Element {
         { label: 'Manage Libraries', hint: 'Ctrl+Shift+I', onClick: () => s.setSidebar('libraries') },
         { label: 'Devices & Boards', onClick: () => s.setSidebar('serial') },
         { sep: true },
-        { label: 'Toolchains & Build', onClick: () => s.setSidebar('settings') }
+        { label: 'Toolchains & Build', onClick: () => s.setMainView('settings') }
       ]
     },
     {

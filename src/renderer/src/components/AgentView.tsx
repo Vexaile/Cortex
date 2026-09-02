@@ -57,7 +57,7 @@ export default function AgentView(): JSX.Element {
     (settings?.ai.provider === 'local' || !!settings?.ai.apiKeySet)
   const [input, setInput] = useState('')
   const endRef = useRef<HTMLDivElement>(null)
-  const setSidebar = useStore((s) => s.setSidebar)
+  const setMainView = useStore((s) => s.setMainView)
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: 'end' })
@@ -78,7 +78,7 @@ export default function AgentView(): JSX.Element {
         {!configured ? (
           <div className="space-y-3">
             <p className="text-[12px] leading-relaxed text-ide-muted">The agent needs an AI provider.</p>
-            <button className="btn btn-accent w-full justify-center text-[12px]" onClick={() => setSidebar('settings')}>
+            <button className="btn btn-accent w-full justify-center text-[12px]" onClick={() => setMainView('settings')}>
               <Settings2 size={14} /> Set up the assistant
             </button>
           </div>

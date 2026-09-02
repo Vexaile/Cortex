@@ -15,14 +15,13 @@ export default function TitleBar(): JSX.Element {
   const workspaceName = useStore((s) => s.workspaceName)
   const tabs = useStore((s) => s.tabs)
   const activePath = useStore((s) => s.activePath)
-  const setSidebar = useStore((s) => s.setSidebar)
+  const mainView = useStore((s) => s.mainView)
+  const setMainView = useStore((s) => s.setMainView)
   const toggleAi = useStore((s) => s.toggleAi)
-  const sidebarVisible = useStore((s) => s.sidebarVisible)
-  const sidebarView = useStore((s) => s.sidebarView)
   const rightView = useStore((s) => s.rightView)
 
   const activeTab = tabs.find((t) => t.path === activePath)
-  const settingsActive = sidebarVisible && sidebarView === 'settings'
+  const settingsActive = mainView === 'settings'
 
   const iconBtn = (active: boolean): string =>
     `no-drag grid h-6 w-6 place-items-center rounded transition-colors ${
@@ -67,7 +66,7 @@ export default function TitleBar(): JSX.Element {
         >
           <Search size={15} />
         </button>
-        <button className={iconBtn(settingsActive)} onClick={() => setSidebar('settings')} title="Settings (Ctrl+,)">
+        <button className={iconBtn(settingsActive)} onClick={() => setMainView('settings')} title="Settings (Ctrl+,)">
           <Settings size={15} />
         </button>
         <button className={iconBtn(rightView === 'agent')} onClick={toggleAi} title="Cortex Agent">

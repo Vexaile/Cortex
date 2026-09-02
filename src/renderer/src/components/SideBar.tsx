@@ -6,7 +6,6 @@ import HardwarePanel from './HardwarePanel'
 import EnvironmentPanel from './EnvironmentPanel'
 import DebugPanel from './DebugPanel'
 import DevicesPanel from './DevicesPanel'
-import SettingsPanel from './SettingsPanel'
 import { useStore } from '../store/useStore'
 
 export default function SideBar(): JSX.Element {
@@ -26,7 +25,6 @@ export default function SideBar(): JSX.Element {
       {view === 'environment' && <EnvironmentPanel />}
       {view === 'debug' && <DebugPanel />}
       {view === 'serial' && <DevicesPanel />}
-      {view === 'settings' && <SettingsPanel />}
     </div>
   )
 }

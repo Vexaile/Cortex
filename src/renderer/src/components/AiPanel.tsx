@@ -12,7 +12,7 @@ const QUICK_ACTIONS = [
 ]
 
 export default function AiPanel(): JSX.Element {
-  const { chat, aiStreaming, sendChat, toggleAi, tabs, activePath, aiWidth, settings, setSidebar, projectModel, agentMode, setAgentMode } =
+  const { chat, aiStreaming, sendChat, toggleAi, tabs, activePath, aiWidth, settings, setMainView, projectModel, agentMode, setAgentMode } =
     useStore()
   // "Configured" means it can actually answer: a provider, plus a key unless the
   // provider is a local endpoint (which needs none).
@@ -139,7 +139,7 @@ export default function AiPanel(): JSX.Element {
               Choose a provider and paste a key (Claude, OpenAI, Gemini), or point Cortex at a local
               model with Ollama or LM Studio, which needs no key.
             </p>
-            <button className="btn btn-accent w-full justify-center text-[12px]" onClick={() => setSidebar('settings')}>
+            <button className="btn btn-accent w-full justify-center text-[12px]" onClick={() => setMainView('settings')}>
               <Settings2 size={14} /> Set up the assistant
             </button>
           </div>
