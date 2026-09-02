@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
-import { RefreshCw, CheckCircle2, XCircle, X, Plus } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { RefreshCw, CheckCircle2, XCircle, X, Plus, Search } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { isValidIndexUrl } from '@shared/boardUrls'
+import { BAUD_RATES } from '@shared/serial'
 import type { ToolchainInfo } from '@shared/ipc'
 
 const KIND_LABEL: Record<ToolchainInfo['kind'], string> = {
@@ -15,14 +16,16 @@ const KIND_LABEL: Record<ToolchainInfo['kind'], string> = {
   other: 'CLI & Tools'
 }
 
-type Category = 'appearance' | 'build' | 'ai' | 'boards' | 'diagnostics'
+type Category = 'appearance' | 'build' | 'serial' | 'ai' | 'boards' | 'diagnostics'
 const CATEGORIES: { id: Category; label: string }[] = [
   { id: 'appearance', label: 'Appearance' },
   { id: 'build', label: 'Build' },
+  { id: 'serial', label: 'Serial' },
   { id: 'ai', label: 'AI' },
   { id: 'boards', label: 'Board Manager' },
   { id: 'diagnostics', label: 'Diagnostics' }
 ]
+const catLabel = (id: Category): string => CATEGORIES.find((c) => c.id === id)?.label ?? id
 
 const input =
   'w-full rounded border border-ide-border bg-ide-bg px-2 py-1.5 text-[12px] text-ide-text outline-none focus:border-ide-accent'
@@ -68,45 +71,52 @@ function DraftInput({
   )
 }
 
-function CategoryTitle({ children }: { children: React.ReactNode }): JSX.Element {
-  return <h2 className="text-[16px] font-semibold text-ide-text">{children}</h2>
-}
-
 /**
- * Settings as a full editor-area surface: a category nav on the left and a wide
- * content pane. It replaces the cramped sidebar panel; every entry point
- * (left rail, title bar, Ctrl+comma, palette) opens this view. All wiring is the
- * same as before - the API key is saved through the main process and never sent
- * back to the renderer.
+ * Settings as a full editor-area surface: a search box + category nav on the
+ * left and a wide content pane. Every entry point (left rail, title bar,
+ * Ctrl+comma, palette) opens this view. Fields are a searchable registry so the
+ * search filters the actual controls, not a fake list. The API key is saved
+ * through the main process and never sent back to the renderer.
  */
 export default function SettingsView(): JSX.Element {
-  const { settings, loadSettings, updateSettings, setTheme, compiler, toolchains, detectToolchains, setMainView } =
-    useStore()
+  const {
+    settings,
+    loadSettings,
+    updateSettings,
+    setTheme,
+    compiler,
+    toolchains,
+    detectToolchains,
+    setMainView,
+    serialBaud,
+    setSerialBaud
+  } = useStore()
   const [cat, setCat] = useState<Category>('appearance')
-  // The content pane is one persistent scroll container, so a tall category
-  // switched to another tall one would open mid-page; reset it each change.
+  const [query, setQuery] = useState('')
   const contentRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (contentRef.current) contentRef.current.scrollTop = 0
-  }, [cat])
   const [rescanning, setRescanning] = useState(false)
   const [keyDraft, setKeyDraft] = useState('')
   const [keySaved, setKeySaved] = useState(false)
   const [urlDraft, setUrlDraft] = useState('')
+
+  useEffect(() => {
+    if (!settings) void loadSettings()
+  }, [settings, loadSettings])
+  // Reset the shared scroll container when the shown content changes.
+  useEffect(() => {
+    if (contentRef.current) contentRef.current.scrollTop = 0
+  }, [cat, query])
 
   const rescan = async (): Promise<void> => {
     setRescanning(true)
     await detectToolchains(true)
     setRescanning(false)
   }
-
   const boardUrls = settings?.boards?.additionalUrls ?? []
-  // Read the current array from the store (not the render closure) so two quick
-  // edits before the async save resolves do not clobber each other.
   const currentUrls = (): string[] => useStore.getState().settings?.boards?.additionalUrls ?? []
   const addBoardUrl = (): void => {
     const u = urlDraft.trim()
-    if (!isValidIndexUrl(u)) return // not a valid http(s) index URL: ignore rather than persist garbage
+    if (!isValidIndexUrl(u)) return
     const urls = currentUrls()
     if (!urls.includes(u)) void updateSettings({ boards: { additionalUrls: [...urls, u] } })
     setUrlDraft('')
@@ -122,10 +132,6 @@ export default function SettingsView(): JSX.Element {
     })
   }
 
-  useEffect(() => {
-    if (!settings) void loadSettings()
-  }, [settings, loadSettings])
-
   const toolGroups = new Map<string, ToolchainInfo[]>()
   for (const t of toolchains) {
     const g = KIND_LABEL[t.kind]
@@ -133,147 +139,214 @@ export default function SettingsView(): JSX.Element {
     toolGroups.get(g)!.push(t)
   }
 
-  const body = (): JSX.Element => {
-    if (!settings) return <div className="text-[12px] text-ide-faint">Loading settings...</div>
-    switch (cat) {
-      case 'appearance':
-        return (
-          <>
-            <CategoryTitle>Appearance</CategoryTitle>
-            <Field label="Theme">
-              {/* Segmented toggle rather than a select: two mutually-exclusive
-                  choices read faster as buttons, and it previews the switch. */}
-              <div
-                className="row w-56 gap-1 rounded border border-ide-border bg-ide-bg p-0.5"
-                role="group"
-                aria-label="Theme"
-              >
-                {(['dark', 'light'] as const).map((t) => {
-                  const active = (settings.theme ?? 'dark') === t
-                  return (
-                    <button
-                      key={t}
-                      className={`flex-1 rounded px-2 py-1 text-[12px] capitalize transition-colors ${
-                        active ? 'bg-ide-accent text-white' : 'text-ide-muted hover:bg-ide-hover hover:text-ide-text'
-                      }`}
-                      aria-pressed={active}
-                      onClick={() => !active && void setTheme(t)}
-                    >
-                      {t}
-                    </button>
-                  )
-                })}
-              </div>
-            </Field>
-          </>
+  // The searchable field registry. `keywords` broadens matching beyond the
+  // visible label (e.g. "gcc" finds the compiler field). `el` is the rendered
+  // control, so search shows the real fields.
+  type FieldDef = { cat: Category; label: string; keywords: string; el: JSX.Element }
+  const fields: FieldDef[] = useMemo(() => {
+    if (!settings) return []
+    return [
+      {
+        cat: 'appearance',
+        label: 'Theme',
+        keywords: 'dark light color mode',
+        el: (
+          <Field label="Theme">
+            <div
+              className="row w-56 gap-1 rounded border border-ide-border bg-ide-bg p-0.5"
+              role="group"
+              aria-label="Theme"
+            >
+              {(['dark', 'light'] as const).map((t) => {
+                const active = (settings.theme ?? 'dark') === t
+                return (
+                  <button
+                    key={t}
+                    className={`flex-1 rounded px-2 py-1 text-[12px] capitalize transition-colors ${
+                      active ? 'bg-ide-accent text-white' : 'text-ide-muted hover:bg-ide-hover hover:text-ide-text'
+                    }`}
+                    aria-pressed={active}
+                    onClick={() => !active && void setTheme(t)}
+                  >
+                    {t}
+                  </button>
+                )
+              })}
+            </div>
+          </Field>
         )
-      case 'build':
-        return (
-          <>
-            <CategoryTitle>Build</CategoryTitle>
-            <Field label="Default C++ compiler" hint="Used when a project has not pinned one of its own.">
-              <DraftInput
-                value={settings.defaultCppCompiler}
-                placeholder={compiler ? `auto: ${compiler}` : 'auto-detect'}
-                onCommit={(v) => void updateSettings({ defaultCppCompiler: v })}
-              />
-            </Field>
-            <Field label="Default C++ standard">
-              <select
+      },
+      {
+        cat: 'build',
+        label: 'Default C++ compiler',
+        keywords: 'gcc clang g++ clang++ toolchain',
+        el: (
+          <Field label="Default C++ compiler" hint="Used when a project has not pinned one of its own.">
+            <DraftInput
+              value={settings.defaultCppCompiler}
+              placeholder={compiler ? `auto: ${compiler}` : 'auto-detect'}
+              onCommit={(v) => void updateSettings({ defaultCppCompiler: v })}
+            />
+          </Field>
+        )
+      },
+      {
+        cat: 'build',
+        label: 'Default C++ standard',
+        keywords: 'c++11 c++17 c++20 c++23 std',
+        el: (
+          <Field label="Default C++ standard">
+            <select
+              className={input}
+              value={settings.defaultCppStandard}
+              onChange={(e) => void updateSettings({ defaultCppStandard: e.target.value })}
+            >
+              {['c++11', 'c++14', 'c++17', 'c++20', 'c++23', 'c++2c'].map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )
+      },
+      {
+        cat: 'build',
+        label: 'Python interpreter',
+        keywords: 'python venv interpreter path',
+        el: (
+          <Field label="Python interpreter" hint="Path to the python used to run scripts. Leave blank to auto-detect.">
+            <DraftInput value={settings.pythonPath} onCommit={(v) => void updateSettings({ pythonPath: v })} />
+          </Field>
+        )
+      },
+      {
+        cat: 'serial',
+        label: 'Baud rate',
+        keywords: 'serial monitor speed bps 115200 9600 baudrate',
+        el: (
+          <Field
+            label="Baud rate"
+            hint="The serial monitor and plotter open the port at this speed. A change takes effect immediately."
+          >
+            <select
+              className={input.replace('w-full', 'w-40')}
+              value={serialBaud}
+              onChange={(e) => void setSerialBaud(Number(e.target.value))}
+            >
+              {BAUD_RATES.map((b) => (
+                <option key={b} value={b}>
+                  {b}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )
+      },
+      {
+        cat: 'ai',
+        label: 'Provider',
+        keywords: 'ai anthropic claude openai gpt gemini ollama lm studio custom',
+        el: (
+          <Field label="Provider">
+            <select
+              className={input}
+              value={settings.ai.provider}
+              onChange={(e) =>
+                void updateSettings({ ai: { ...settings.ai, provider: e.target.value as never, model: '' } })
+              }
+            >
+              <option value="none">None (offline)</option>
+              <option value="anthropic">Anthropic (Claude)</option>
+              <option value="openai">OpenAI (GPT)</option>
+              <option value="gemini">Google (Gemini)</option>
+              <option value="local">Local (Ollama / LM Studio)</option>
+              <option value="custom">Custom (OpenAI-compatible)</option>
+            </select>
+          </Field>
+        )
+      },
+      {
+        cat: 'ai',
+        label: 'Model',
+        keywords: 'ai model',
+        el: (
+          <Field label="Model">
+            <DraftInput
+              value={settings.ai.model}
+              placeholder={
+                {
+                  anthropic: 'claude-opus-4-8',
+                  openai: 'gpt-4o',
+                  gemini: 'gemini-2.5-flash',
+                  local: 'llama3.1',
+                  custom: 'model id',
+                  none: ''
+                }[settings.ai.provider]
+              }
+              onCommit={(v) => void updateSettings({ ai: { ...settings.ai, model: v } })}
+            />
+          </Field>
+        )
+      },
+      {
+        cat: 'ai',
+        label: 'API key',
+        keywords: 'ai api key token secret',
+        el: (
+          <Field label="API key">
+            <div className="row gap-1.5">
+              <input
+                type="password"
                 className={input}
-                value={settings.defaultCppStandard}
-                onChange={(e) => void updateSettings({ defaultCppStandard: e.target.value })}
-              >
-                {['c++11', 'c++14', 'c++17', 'c++20', 'c++23', 'c++2c'].map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Python interpreter" hint="Path to the python used to run scripts. Leave blank to auto-detect.">
-              <DraftInput value={settings.pythonPath} onCommit={(v) => void updateSettings({ pythonPath: v })} />
-            </Field>
-          </>
-        )
-      case 'ai':
-        return (
-          <>
-            <CategoryTitle>AI</CategoryTitle>
-            <Field label="Provider">
-              <select
-                className={input}
-                value={settings.ai.provider}
-                // Clear the model on provider change: keeping the old id sends e.g.
-                // a Claude id to Ollama, which 404s on the one path needing no key.
-                onChange={(e) =>
-                  void updateSettings({ ai: { ...settings.ai, provider: e.target.value as never, model: '' } })
-                }
-              >
-                <option value="none">None (offline)</option>
-                <option value="anthropic">Anthropic (Claude)</option>
-                <option value="openai">OpenAI (GPT)</option>
-                <option value="gemini">Google (Gemini)</option>
-                <option value="local">Local (Ollama / LM Studio)</option>
-                <option value="custom">Custom (OpenAI-compatible)</option>
-              </select>
-            </Field>
-            <Field label="Model">
-              <DraftInput
-                value={settings.ai.model}
-                placeholder={
-                  {
-                    anthropic: 'claude-opus-4-8',
-                    openai: 'gpt-4o',
-                    gemini: 'gemini-2.5-flash',
-                    local: 'llama3.1',
-                    custom: 'model id',
-                    none: ''
-                  }[settings.ai.provider]
-                }
-                onCommit={(v) => void updateSettings({ ai: { ...settings.ai, model: v } })}
+                placeholder={settings.ai.apiKeySet ? 'saved. type a new key to replace' : 'paste your key'}
+                value={keyDraft}
+                onChange={(e) => {
+                  setKeyDraft(e.target.value)
+                  setKeySaved(false)
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && keyDraft.trim()) saveKey()
+                }}
               />
-            </Field>
-            <Field label="API key">
-              <div className="row gap-1.5">
-                <input
-                  type="password"
-                  className={input}
-                  placeholder={settings.ai.apiKeySet ? 'saved. type a new key to replace' : 'paste your key'}
-                  value={keyDraft}
-                  onChange={(e) => {
-                    setKeyDraft(e.target.value)
-                    setKeySaved(false)
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && keyDraft.trim()) saveKey()
-                  }}
-                />
-                <button className="btn btn-accent shrink-0 text-[12px] disabled:opacity-40" disabled={!keyDraft.trim()} onClick={saveKey}>
-                  Save
-                </button>
-              </div>
-              {(keySaved || settings.ai.apiKeySet) && !keyDraft && (
-                <span className="mt-1 block text-[11px] text-ide-moss">Key saved and encrypted.</span>
-              )}
-            </Field>
-            <Field label="Base URL (optional)">
-              <DraftInput
-                value={settings.ai.baseUrl}
-                placeholder="e.g. http://localhost:11434 for Ollama"
-                onCommit={(v) => void updateSettings({ ai: { ...settings.ai, baseUrl: v } })}
-              />
-            </Field>
-            <p className="text-[11px] leading-relaxed text-ide-faint">
-              The API key is encrypted at rest with your OS keychain (safeStorage) and stays in the main process. It
-              never leaves your machine except in requests you initiate to the provider you choose.
-            </p>
-          </>
+              <button
+                className="btn btn-accent shrink-0 text-[12px] disabled:opacity-40"
+                disabled={!keyDraft.trim()}
+                onClick={saveKey}
+              >
+                Save
+              </button>
+            </div>
+            {(keySaved || settings.ai.apiKeySet) && !keyDraft && (
+              <span className="mt-1 block text-[11px] text-ide-moss">Key saved and encrypted.</span>
+            )}
+            <span className="mt-1.5 block text-[11px] leading-relaxed text-ide-faint">
+              Encrypted at rest with your OS keychain (safeStorage) and kept in the main process. It never leaves your
+              machine except in requests you initiate to the provider you choose.
+            </span>
+          </Field>
         )
-      case 'boards':
-        return (
-          <>
-            <CategoryTitle>Board Manager</CategoryTitle>
+      },
+      {
+        cat: 'ai',
+        label: 'Base URL',
+        keywords: 'ai base url endpoint ollama localhost',
+        el: (
+          <Field label="Base URL (optional)">
+            <DraftInput
+              value={settings.ai.baseUrl}
+              placeholder="e.g. http://localhost:11434 for Ollama"
+              onCommit={(v) => void updateSettings({ ai: { ...settings.ai, baseUrl: v } })}
+            />
+          </Field>
+        )
+      },
+      {
+        cat: 'boards',
+        label: 'Board Manager URLs',
+        keywords: 'esp32 esp8266 package index core additional url',
+        el: (
+          <div className="space-y-2">
             <p className="text-[11px] leading-relaxed text-ide-faint">
               Extra package index URLs for the Boards Manager. ESP32 and ESP8266 are included by default. A new URL
               takes effect the next time you search or install a core.
@@ -316,24 +389,27 @@ export default function SettingsView(): JSX.Element {
                 <Plus size={13} /> Add
               </button>
             </div>
-          </>
+          </div>
         )
-      case 'diagnostics':
-        return (
-          <>
+      },
+      {
+        cat: 'diagnostics',
+        label: 'Detected toolchains',
+        keywords: 'diagnostics compilers tools detected version rescan system',
+        el: (
+          <div className="space-y-2">
             <div className="row items-center justify-between">
-              <CategoryTitle>Diagnostics</CategoryTitle>
+              <p className="text-[11px] leading-relaxed text-ide-faint">
+                Read-only: the compilers and tools Cortex detected on this machine.
+              </p>
               <button
-                className="row gap-1 rounded px-1.5 py-0.5 text-[11px] text-ide-muted hover:bg-ide-hover hover:text-ide-text"
+                className="row shrink-0 gap-1 rounded px-1.5 py-0.5 text-[11px] text-ide-muted hover:bg-ide-hover hover:text-ide-text"
                 onClick={rescan}
                 title="Rescan your system"
               >
                 <RefreshCw size={12} className={rescanning ? 'animate-spin' : ''} /> Rescan
               </button>
             </div>
-            <p className="text-[11px] leading-relaxed text-ide-faint">
-              Read-only: the compilers and tools Cortex detected on this machine.
-            </p>
             {toolchains.length === 0 ? (
               <div className="text-[12px] text-ide-faint">Scanning your system...</div>
             ) : (
@@ -357,8 +433,6 @@ export default function SettingsView(): JSX.Element {
                         </span>
                         {t.available && t.version && (
                           <span className="mono shrink-0 truncate text-[10px] text-ide-muted" style={{ maxWidth: 120 }}>
-                            {/* First dotted version, so "g++ (Rev2, ...) 14.2.0" reads
-                                14.2.0 rather than the "2" inside "Rev2". */}
                             {t.version.match(/\d+\.\d+(?:\.\d+)?/)?.[0] ?? t.version.split(' ')[0]}
                           </span>
                         )}
@@ -368,10 +442,17 @@ export default function SettingsView(): JSX.Element {
                 ))}
               </div>
             )}
-          </>
+          </div>
         )
-    }
-  }
+      }
+    ]
+  }, [settings, compiler, toolchains, rescanning, keyDraft, keySaved, urlDraft, boardUrls, serialBaud])
+
+  const q = query.trim().toLowerCase()
+  const matches = (f: FieldDef): boolean =>
+    !q || f.label.toLowerCase().includes(q) || f.keywords.includes(q) || catLabel(f.cat).toLowerCase().includes(q)
+  const shown = q ? fields.filter(matches) : fields.filter((f) => f.cat === cat)
+  const matchingCats = new Set(fields.filter(matches).map((f) => f.cat))
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-ide-border bg-ide-bg">
@@ -387,22 +468,79 @@ export default function SettingsView(): JSX.Element {
         </button>
       </div>
       <div className="flex min-h-0 flex-1">
-        <nav className="w-48 shrink-0 overflow-auto border-r border-ide-border bg-ide-panel p-2" aria-label="Settings categories">
-          {CATEGORIES.map((c) => (
-            <button
-              key={c.id}
-              className={`w-full rounded px-2 py-1.5 text-left text-[12.5px] transition-colors ${
-                cat === c.id ? 'bg-ide-active text-ide-text' : 'text-ide-muted hover:bg-ide-hover hover:text-ide-text'
-              }`}
-              aria-current={cat === c.id}
-              onClick={() => setCat(c.id)}
-            >
-              {c.label}
-            </button>
-          ))}
+        <nav className="flex w-52 shrink-0 flex-col border-r border-ide-border bg-ide-panel" aria-label="Settings categories">
+          <div className="row m-2 gap-1.5 rounded border border-ide-border bg-ide-bg px-2">
+            <Search size={13} className="shrink-0 text-ide-faint" />
+            <input
+              className="h-7 w-full bg-transparent text-[12px] text-ide-text outline-none placeholder:text-ide-faint"
+              placeholder="Search settings"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              aria-label="Search settings"
+            />
+            {query && (
+              <button
+                className="shrink-0 rounded p-0.5 text-ide-faint hover:text-ide-text"
+                title="Clear"
+                aria-label="Clear search"
+                onClick={() => setQuery('')}
+              >
+                <X size={12} />
+              </button>
+            )}
+          </div>
+          <div className="min-h-0 flex-1 overflow-auto px-2 pb-2">
+            {CATEGORIES.map((c) => {
+              const dim = !!q && !matchingCats.has(c.id)
+              return (
+                <button
+                  key={c.id}
+                  className={`w-full rounded px-2 py-1.5 text-left text-[12.5px] transition-colors ${
+                    !q && cat === c.id
+                      ? 'bg-ide-active text-ide-text'
+                      : dim
+                        ? 'text-ide-faint hover:bg-ide-hover'
+                        : 'text-ide-muted hover:bg-ide-hover hover:text-ide-text'
+                  }`}
+                  aria-current={!q && cat === c.id}
+                  onClick={() => {
+                    setQuery('')
+                    setCat(c.id)
+                  }}
+                >
+                  {c.label}
+                </button>
+              )
+            })}
+          </div>
         </nav>
         <div ref={contentRef} className="min-h-0 flex-1 overflow-auto">
-          <div className="mx-auto max-w-2xl space-y-4 p-6">{body()}</div>
+          <div className="mx-auto max-w-2xl space-y-4 p-6">
+            {!settings ? (
+              <div className="text-[12px] text-ide-faint">Loading settings...</div>
+            ) : q ? (
+              shown.length === 0 ? (
+                <div className="text-[12px] text-ide-faint">No settings match &quot;{query}&quot;.</div>
+              ) : (
+                // Search: matching fields, grouped by category.
+                CATEGORIES.filter((c) => shown.some((f) => f.cat === c.id)).map((c) => (
+                  <section key={c.id} className="space-y-4">
+                    <h3 className="text-[11px] font-semibold uppercase tracking-wider text-ide-faint">{c.label}</h3>
+                    {shown.filter((f) => f.cat === c.id).map((f, i) => (
+                      <div key={i}>{f.el}</div>
+                    ))}
+                  </section>
+                ))
+              )
+            ) : (
+              <>
+                <h2 className="text-[16px] font-semibold text-ide-text">{catLabel(cat)}</h2>
+                {shown.map((f, i) => (
+                  <div key={i}>{f.el}</div>
+                ))}
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>

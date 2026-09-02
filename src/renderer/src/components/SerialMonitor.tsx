@@ -3,8 +3,7 @@ import { Send, Plug, PlugZap, LineChart, List, Radio } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import SerialPlotter from './SerialPlotter'
 import EmptyState from './EmptyState'
-
-const BAUDS = [9600, 19200, 38400, 57600, 74880, 115200, 230400, 250000, 460800, 921600]
+import { BAUD_RATES as BAUDS } from '@shared/serial'
 
 export default function SerialMonitor(): JSX.Element {
   const {
