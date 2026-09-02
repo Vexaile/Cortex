@@ -59,6 +59,7 @@ interface OpenDesc {
 export default function VcsPanel(): JSX.Element {
   const workspaceRoot = useStore((s) => s.workspaceRoot)
   const notify = useStore((s) => s.notify)
+  const confirm = useStore((s) => s.confirm)
   const [status, setStatus] = useState<GitStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -169,6 +170,23 @@ export default function VcsPanel(): JSX.Element {
     }
   }
 
+  // Push is outward-facing (it publishes to a remote), so it always confirms
+  // first and is never automatic. The Push affordance only appears when there
+  // are commits ahead of a known upstream, so this guard is belt-and-braces.
+  const doPush = async (): Promise<void> => {
+    const s = status
+    if (busy || !s?.upstream || s.ahead < 1) return
+    const ok = await confirm({
+      title: 'Push commits',
+      message: `Push ${s.ahead} commit${s.ahead === 1 ? '' : 's'} to ${s.upstream}?`,
+      confirmLabel: 'Push'
+    })
+    if (!ok) return
+    const r = await doOp(() => window.api.gitPush())
+    if (r.ok) notify('success', 'Pushed', `to ${s.upstream}`)
+    else notify('error', 'Push failed', r.error)
+  }
+
   const header = (
     <PanelHeader
       icon={<GitBranch size={13} />}
@@ -237,18 +255,28 @@ export default function VcsPanel(): JSX.Element {
         <div className="row items-center gap-1.5 border-b border-ide-border/60 px-3 py-1 text-[11px]">
           <GitBranch size={12} className="shrink-0 text-ide-faint" />
           <span className="truncate text-ide-text">{status.branch}</span>
-          {status.ahead > 0 && (
-            <span className="row items-center text-ide-faint" title={`${status.ahead} ahead of upstream`}>
-              <ArrowUp size={11} />
-              {status.ahead}
-            </span>
-          )}
           {status.behind > 0 && (
-            <span className="row items-center text-ide-faint" title={`${status.behind} behind upstream`}>
+            <span className="row items-center text-ide-faint" title={`${status.behind} behind ${status.upstream ?? 'upstream'}`}>
               <ArrowDown size={11} />
               {status.behind}
             </span>
           )}
+          {status.ahead > 0 &&
+            (status.upstream ? (
+              <button
+                className="row ml-auto items-center gap-1 rounded px-1.5 py-0.5 text-ide-muted enabled:hover:bg-ide-hover enabled:hover:text-ide-text disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={busy}
+                onClick={() => void doPush()}
+                title={`Push ${status.ahead} commit${status.ahead === 1 ? '' : 's'} to ${status.upstream}`}
+              >
+                <ArrowUp size={12} /> Push {status.ahead}
+              </button>
+            ) : (
+              <span className="row ml-auto items-center text-ide-faint" title={`${status.ahead} unpushed (no upstream set)`}>
+                <ArrowUp size={11} />
+                {status.ahead}
+              </span>
+            ))}
         </div>
       )}
 

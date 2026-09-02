@@ -28,6 +28,8 @@ export interface GitFileStatus {
 
 export interface GitStatusResult {
   branch?: string
+  /** The tracked upstream ref (e.g. "origin/main"), when the branch has one. */
+  upstream?: string
   ahead: number
   behind: number
   files: GitFileStatus[]
@@ -36,6 +38,7 @@ export interface GitStatusResult {
 export function parsePorcelain(output: string): GitStatusResult {
   const records = output.split('\0')
   let branch: string | undefined
+  let upstream: string | undefined
   let ahead = 0
   let behind = 0
   const files: GitFileStatus[] = []
@@ -51,8 +54,11 @@ export function parsePorcelain(output: string): GitStatusResult {
         branch = info.slice(NO_COMMITS.length).split(' ')[0]
       } else {
         // Split on the tracking separator (exactly three dots) before touching
-        // spaces, so a branch name that itself contains a dot survives.
-        branch = info.split('...')[0].split(' ')[0]
+        // spaces, so a branch name that itself contains a dot survives. The part
+        // after "..." (before the " [ahead...]") is the upstream ref.
+        const track = info.split('...')
+        branch = track[0].split(' ')[0]
+        if (track.length > 1) upstream = track[1].split(' ')[0] || undefined
       }
       const a = /\bahead (\d+)/.exec(info)
       if (a) ahead = parseInt(a[1], 10)
@@ -75,5 +81,5 @@ export function parsePorcelain(output: string): GitStatusResult {
     files.push(entry)
   }
 
-  return { branch, ahead, behind, files }
+  return { branch, upstream, ahead, behind, files }
 }

@@ -18,6 +18,11 @@ export default function ConfirmDialog(): JSX.Element | null {
     if (!req) return
     confirmRef.current?.focus()
     const onKey = (e: KeyboardEvent): void => {
+      // Ignore OS auto-repeat: the same held (or rapidly repeated) Enter that
+      // activated the trigger must not also confirm the dialog it just opened -
+      // that would defeat the confirmation for an outward-facing or destructive
+      // action. A fresh, deliberate keypress still works.
+      if (e.repeat) return
       if (e.key === 'Escape') {
         e.preventDefault()
         answer(false)

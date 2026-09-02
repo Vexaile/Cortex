@@ -5,9 +5,10 @@ import { parsePorcelain } from '../src/shared/gitStatus'
 const z = (...records: string[]): string => records.join('\0')
 
 describe('parsePorcelain', () => {
-  it('reads the branch and ahead/behind from the header', () => {
+  it('reads the branch, upstream, and ahead/behind from the header', () => {
     const r = parsePorcelain(z('## main...origin/main [ahead 2, behind 1]'))
     expect(r.branch).toBe('main')
+    expect(r.upstream).toBe('origin/main')
     expect(r.ahead).toBe(2)
     expect(r.behind).toBe(1)
     expect(r.files).toEqual([])
@@ -16,6 +17,7 @@ describe('parsePorcelain', () => {
   it('handles a branch with no upstream', () => {
     const r = parsePorcelain(z('## feature-x'))
     expect(r.branch).toBe('feature-x')
+    expect(r.upstream).toBeUndefined()
     expect(r.ahead).toBe(0)
     expect(r.behind).toBe(0)
   })

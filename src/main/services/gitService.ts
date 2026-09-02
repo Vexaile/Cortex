@@ -73,7 +73,14 @@ export async function status(): Promise<GitStatus> {
   // Porcelain paths are repo-root-relative; keep only those inside the open
   // workspace (which may be a subdirectory of the repo).
   const files = parsed.files.filter((f) => withinWorkspace(join(root, f.path)))
-  return { isRepo: true, branch: parsed.branch, ahead: parsed.ahead, behind: parsed.behind, files }
+  return {
+    isRepo: true,
+    branch: parsed.branch,
+    upstream: parsed.upstream,
+    ahead: parsed.ahead,
+    behind: parsed.behind,
+    files
+  }
 }
 
 /** Content of a repo-relative path at a git ref (`HEAD:p`, `:p` for the index),
@@ -127,22 +134,39 @@ async function runMutation(cwd: string, args: string[]): Promise<GitOpResult> {
   const bin = safeCommand('git', getWorkspaceRoot())
   if (!bin || needsShell(bin)) return { ok: false, error: 'git is not available on PATH.' }
   try {
-    await execFileAsync(bin, args, { cwd, windowsHide: true, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })
+    await execFileAsync(bin, args, {
+      cwd,
+      windowsHide: true,
+      encoding: 'utf8',
+      maxBuffer: 16 * 1024 * 1024,
+      // Fail fast instead of blocking the whole panel forever: a stalled network
+      // push, or a credential/askpass GUI, would otherwise hang the child (busy
+      // stays set). GIT_TERMINAL_PROMPT=0 stops git's own terminal prompt; the
+      // timeout backstops the cases it does not cover.
+      timeout: 60_000,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }
+    })
     return { ok: true }
   } catch (e) {
+    const err = e as { stderr?: string; stdout?: string; killed?: boolean; signal?: string }
+    if (err?.killed || err?.signal) return { ok: false, error: 'git timed out (60s) - check the network or remote.' }
     // git writes its real reason to stderr OR (for `commit` with nothing to
     // commit) to stdout. Deliberately NEVER fall back to Node's e.message: it is
     // "Command failed: <absolute git.exe path> commit -m <the message>", which
     // leaks the binary path and the user's commit text and is not git's reason.
-    const err = e as { stderr?: string; stdout?: string }
     const lines = (s: unknown): string[] =>
       String(s ?? '').split('\n').map((x) => x.trim()).filter((x) => x.length > 0 && !x.startsWith('Command failed'))
     const stderr = lines(err?.stderr)
     const stdout = lines(err?.stdout)
-    // stderr's first line is the reason for fatal:/error:/identity failures. A
-    // `commit` with nothing to do prints only to stdout, where the reason is the
-    // LAST line ("nothing to commit ...") after a generic "On branch X" header.
-    const msg = stderr[0] || stdout[stdout.length - 1] || 'git command failed.'
+    // Prefer the actual reason. A rejected push leads with "To <remote>" (an
+    // unhelpful header that also spells out the remote path), so skip it and
+    // pick the fatal/error/rejected/hint line; a `commit` with nothing to do
+    // prints only to stdout, where the reason is the last line after "On branch".
+    const reason =
+      stderr.find((l) => /\[rejected\]|\[remote rejected\]|^error:|^fatal:|^hint:|^remote:/.test(l)) ||
+      stderr.find((l) => !l.startsWith('To ')) ||
+      stderr[0]
+    const msg = reason || stdout[stdout.length - 1] || 'git command failed.'
     return { ok: false, error: msg.slice(0, 300) }
   }
 }
@@ -194,4 +218,14 @@ export async function commit(message: string): Promise<GitOpResult> {
   // it are literal text, never interpretable as commands. git itself rejects an
   // empty index ("nothing to commit") or a missing identity, surfaced as-is.
   return runMutation(root, ['commit', '-m', message])
+}
+
+/** Push the current branch to its configured upstream. Outward-facing: the
+ *  caller confirms first. No args, so nothing user-controlled reaches git; a
+ *  missing upstream / rejected push / auth failure surfaces as git's own error
+ *  (GIT_TERMINAL_PROMPT=0 means it fails fast rather than blocking on a prompt). */
+export async function push(): Promise<GitOpResult> {
+  const root = await repoRoot()
+  if (!root) return { ok: false, error: 'Not a git repository.' }
+  return runMutation(root, ['push'])
 }

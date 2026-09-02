@@ -95,6 +95,7 @@ export const IPC = {
   GIT_STAGE: 'git:stage',
   GIT_UNSTAGE: 'git:unstage',
   GIT_COMMIT: 'git:commit',
+  GIT_PUSH: 'git:push',
 
   // Simulator (Wokwi/Tinkercad-style native simulation)
   SIM_START: 'sim:start',
@@ -502,6 +503,7 @@ export interface DebugOutput {
 export interface GitStatus {
   isRepo: boolean
   branch?: string
+  upstream?: string
   ahead: number
   behind: number
   files: GitFileStatus[]
