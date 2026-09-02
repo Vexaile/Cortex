@@ -1,7 +1,14 @@
-import { Folder, CircleDot, Radio, AlertCircle, CheckCircle2, Braces, MemoryStick } from 'lucide-react'
+import { useState } from 'react'
+import { Folder, CircleDot, Radio, AlertCircle, CheckCircle2, Braces, MemoryStick, Bell, Info, Trash2 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { langForFile, LSP_SERVER_LABEL, LSP_INSTALL_HINT, LSP_BUSY_HINT } from '@shared/lsp'
 import { lineEnding } from '@shared/textInfo'
+
+const NOTIF_ICON = {
+  success: <CheckCircle2 size={13} className="shrink-0 text-ide-green" />,
+  error: <AlertCircle size={13} className="shrink-0 text-ide-red" />,
+  info: <Info size={13} className="shrink-0 text-ide-accent" />
+}
 
 export default function StatusBar(): JSX.Element {
   const {
@@ -19,8 +26,13 @@ export default function StatusBar(): JSX.Element {
     lspBusy,
     projectModel,
     cursorPos,
-    mainView
+    mainView,
+    notifications,
+    notifUnread,
+    markNotifsRead,
+    clearNotifications
   } = useStore()
+  const [notifOpen, setNotifOpen] = useState(false)
   const board = projectModel?.boards[0]
   const activeTab = tabs.find((t) => t.path === activePath)
   // Language-server status for the active file. Null for files no server handles
@@ -115,6 +127,60 @@ export default function StatusBar(): JSX.Element {
             </span>
           </>
         )}
+
+        {/* Notifications: the bell + a history popover. Opening marks the log
+            seen (clears the unread count). Async results also flash as toasts. */}
+        <div className="relative">
+          <button
+            className={`row gap-1 rounded px-1 hover:bg-ide-hover hover:text-ide-text ${notifUnread > 0 ? 'text-ide-text' : ''}`}
+            onClick={() => {
+              setNotifOpen((o) => !o)
+              markNotifsRead()
+            }}
+            title="Notifications"
+            aria-label={notifUnread > 0 ? `Notifications (${notifUnread} new)` : 'Notifications'}
+          >
+            <Bell size={12} />
+            {notifUnread > 0 && <span className="mono text-[10px] text-ide-accent">{notifUnread}</span>}
+          </button>
+          {notifOpen && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setNotifOpen(false)} />
+              <div className="absolute bottom-full right-0 z-50 mb-1 max-h-[60vh] w-80 overflow-auto rounded-md border border-ide-border bg-ide-panel shadow-xl">
+                <div className="row sticky top-0 items-center justify-between border-b border-ide-border bg-ide-panel px-3 py-1.5">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-ide-faint">Notifications</span>
+                  {notifications.length > 0 && (
+                    <button
+                      className="row gap-1 rounded px-1 py-0.5 text-[10px] text-ide-muted hover:bg-ide-hover hover:text-ide-text"
+                      onClick={clearNotifications}
+                      title="Clear all"
+                    >
+                      <Trash2 size={11} /> Clear
+                    </button>
+                  )}
+                </div>
+                {notifications.length === 0 ? (
+                  <div className="px-3 py-3 text-[11px] text-ide-faint">
+                    No notifications yet. Build, upload, and run results appear here.
+                  </div>
+                ) : (
+                  notifications.map((n) => (
+                    <div key={n.id} className="row items-start gap-2 px-3 py-1.5 text-[12px]">
+                      <div className="mt-0.5">{NOTIF_ICON[n.kind]}</div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-ide-text">{n.title}</div>
+                        {n.detail && <div className="truncate text-[11px] text-ide-muted" title={n.detail}>{n.detail}</div>}
+                      </div>
+                      <span className="mono shrink-0 text-[10px] text-ide-faint">
+                        {new Date(n.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </div>
   )

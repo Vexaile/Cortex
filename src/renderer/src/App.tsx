@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useStore, LAST_WORKSPACE_KEY } from './store/useStore'
 import CommandPalette, { type PaletteMode } from './components/CommandPalette'
 import ConfirmDialog from './components/ConfirmDialog'
+import Toasts from './components/Toasts'
 import Splitter from './components/Splitter'
 import TitleBar from './components/TitleBar'
 import Toolbar from './components/Toolbar'
@@ -241,6 +242,7 @@ export default function App(): JSX.Element {
       {splashMounted && <Splash leaving={!booting} onExited={() => setSplashMounted(false)} />}
       {palette && <CommandPalette mode={palette} onClose={() => setPalette(null)} />}
       <ConfirmDialog />
+      <Toasts />
       <TitleBar />
       {/* The run/build toolbar belongs to the editor working on a project.
           Hidden on the Welcome screen (nothing to run) and in the Simulator

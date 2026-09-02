@@ -69,8 +69,9 @@ raw `-O0/-Os` → Debug / Balanced / Release / Size. raw `g++/clang++` → GCC /
 - **7b** Broad terminology sweep: apply the central map to the remaining ~audit strings (Devices, Boards/Library search + empty states, Hardware, tooltips, OutputConsole, TerminalPanel, menus) where copy is still raw/implementation-flavoured. Surgical - only user-facing copy that is genuinely unclear.
 
 ### Phase 8  -  States + notifications
-- Real terminal first-run (no blueprint hints; a live prompt). Coherent empty / loading / error / disconnected / needs-setup / unsupported states across every surface, each answering what happened + what to do next.
-- Themed notifications/toast center with a small history (status-bar bell), so async success/failure stops hijacking the bottom panel [audit MEDIUM].
+- **8a** ✅ (found already done) Real terminal first-run: the terminal is a live pty-backed xterm (TerminalPanel + terminalController) with honest exited/unavailable states + Restart, and Output/Serial/Problems already carry honest empty states; no "Press F5"-style blueprint strings remain (fixed in earlier work). Static `UTF-8` was killed in Phase 5.
+- **8b** ✅ Themed notifications/toast center [audit MEDIUM]. A store slice (`notifications` newest-first capped 50 + `notifUnread`; `notify`/`markNotifsRead`/`clearNotifications`), a `Toasts` host (bottom-right cards; success/info auto-dismiss, errors sticky; aria-live), and a status-bar **bell** with the unread count + a history popover (Clear all). `handleRunExit` emits real notifications for verify/upload/build/run success+failure, so an async result no longer needs the Output panel open to be seen. Live-verified via CDP.
+- **8c** Coherent empty / loading / error / disconnected / needs-setup / unsupported states across the remaining surfaces, each answering what happened + what to do next (most are already honest; sweep for the gaps).
 
 ### Phase 9  -  Debugger first-class
 - Coherent layout: controls · Call Stack · Variables · Watches · Breakpoints · Threads/Tasks · Registers · Memory · Console. Honest empty state when idle; clear explanation when unavailable for a target.

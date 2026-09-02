@@ -341,6 +341,15 @@ export type SidebarView =
 // surfaces that belong on the right, next to the editor; the right-edge rail
 // toggles between them (or hides the dock with null).
 export type RightView = 'agent' | 'datasheets' | null
+
+/** A one-line async result surfaced as a toast + in the status-bar history. */
+export interface AppNotification {
+  id: string
+  kind: 'success' | 'error' | 'info'
+  title: string
+  detail?: string
+  ts: number
+}
 export type BottomView = 'output' | 'serial' | 'problems' | 'terminal'
 
 let runCounter = 0
@@ -373,6 +382,9 @@ let lockCheckSeq = 0
 let datasheetQuerySeq = 0
 /** Set when an upload closed the serial monitor, so we can reopen it after. */
 let reopenSerialAfterUpload = false
+// The file a Run/Verify/Upload targeted, captured at start so the completion
+// notification names the right file even if the user has since switched tabs.
+let runTargetFile = ''
 
 /**
  * Shared setup for a streamed arduino-cli package operation (core/lib install,
@@ -491,6 +503,11 @@ interface State {
 
   // derived project model: languages, board/platform, GPIO usage
   projectModel: ProjectModel | null
+
+  // notifications: async results (build/upload done, etc.) surface here as
+  // toasts + a status-bar history, instead of only in whichever panel was open.
+  notifications: AppNotification[]
+  notifUnread: number
 
   // run
   runId: string | null
@@ -611,6 +628,12 @@ interface State {
   setBottom: (v: BottomView) => void
   openTerminal: () => void
   toggleBottom: () => void
+  /** Post a notification (toast + history). Generates id + timestamp. */
+  notify: (kind: AppNotification['kind'], title: string, detail?: string) => void
+  /** Mark the notification history as seen (clears the unread count). */
+  markNotifsRead: () => void
+  /** Clear the notification history. */
+  clearNotifications: () => void
   setSerialPlot: (on: boolean) => void
   /** Toggle the Agent in the right dock (kept as toggleAi for its many callers). */
   toggleAi: () => void
@@ -862,6 +885,9 @@ export const useStore = create<State>((set, get) => ({
   projectPython: '',
   debugRunId: null,
   optimization: '-O0',
+
+  notifications: [],
+  notifUnread: 0,
 
   runId: null,
   running: false,
@@ -1280,6 +1306,17 @@ export const useStore = create<State>((set, get) => ({
   toggleBottom() {
     set({ bottomVisible: !get().bottomVisible })
   },
+  notify(kind, title, detail) {
+    const n: AppNotification = { id: `n-${performance.now()}`, kind, title, detail, ts: Date.now() }
+    // Newest first; cap the log so a long session cannot grow it without bound.
+    set({ notifications: [n, ...get().notifications].slice(0, 50), notifUnread: get().notifUnread + 1 })
+  },
+  markNotifsRead() {
+    if (get().notifUnread !== 0) set({ notifUnread: 0 })
+  },
+  clearNotifications() {
+    set({ notifications: [], notifUnread: 0 })
+  },
   toggleAi() {
     const v: RightView = get().rightView === 'agent' ? null : 'agent'
     set({ rightView: v })
@@ -1591,6 +1628,7 @@ export const useStore = create<State>((set, get) => ({
       return get().startSim()
     }
     await get().saveActive()
+    runTargetFile = baseName(tab.path)
     const id = nextRunId()
     const cwd = workspaceRoot || tab.path.replace(/[\\/][^\\/]+$/, '')
     set({
@@ -1666,9 +1704,16 @@ export const useStore = create<State>((set, get) => ({
     resolvePkgOp(e.id)
     if (e.id !== get().runId) return
     const { runAction } = get()
+    const file = runTargetFile || 'the sketch'
+    // A signal-terminated process reports code null; naming the signal is truer
+    // than "exit code null".
+    const cause = e.signal ? `terminated by ${e.signal}` : `exit code ${e.code}`
     // Board verify/upload: the compile step is terminal (no run phase follows).
     if (runAction === 'verify' || runAction === 'upload') {
       set({ running: false, runPhase: 'idle', runAction: null, lastExitCode: e.code })
+      const verb = runAction === 'verify' ? 'Verify' : 'Upload'
+      if (e.code === 0) get().notify('success', `${verb} complete`, file)
+      else get().notify('error', `${verb} failed`, cause)
       if (runAction === 'upload' && reopenSerialAfterUpload) {
         reopenSerialAfterUpload = false
         void get().toggleSerial() // reopen the monitor we closed for the flash
@@ -1677,8 +1722,17 @@ export const useStore = create<State>((set, get) => ({
     }
     if (e.phase === 'compile' && e.code !== 0) {
       set({ running: false, runPhase: 'idle', runAction: null, lastExitCode: e.code })
+      get().notify('error', 'Build failed', `${file}: ${cause}`)
     } else if (e.phase === 'run') {
+      // Package ops (installLib/installCore/restoreFromLock) share this branch
+      // with runAction null; only a real program Run should notify. Their own
+      // results are reported by their callers.
+      const wasRun = runAction === 'run'
       set({ running: false, runPhase: 'idle', runAction: null, lastExitCode: e.code })
+      if (wasRun) {
+        if (e.code === 0) get().notify('success', 'Program finished', file)
+        else get().notify('error', 'Program exited', `${file}: ${cause}`)
+      }
     } else if (e.phase === 'compile') {
       // compile succeeded → the run phase begins
       set({ runPhase: 'run' })
@@ -2187,6 +2241,7 @@ export const useStore = create<State>((set, get) => ({
     const tab = tabs.find((t) => t.path === activePath)
     if (!tab) return
     await get().saveActive()
+    runTargetFile = baseName(activePath)
     const id = nextRunId()
     set({
       runId: id,
@@ -2237,6 +2292,7 @@ export const useStore = create<State>((set, get) => ({
       reopenSerialAfterUpload = true
     }
     await get().saveActive()
+    runTargetFile = baseName(activePath)
     const id = nextRunId()
     set({
       runId: id,
