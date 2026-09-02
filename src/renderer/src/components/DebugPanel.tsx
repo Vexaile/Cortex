@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Bug,
   Play,
@@ -15,6 +15,68 @@ import {
 import PanelHeader from './PanelHeader'
 import { useStore, isSketch } from '../store/useStore'
 import { isHeaderPath } from '@shared/languages'
+import { parseGdbValue, type GdbNode } from '@shared/gdbValue'
+
+// A single array/struct can list thousands of elements; render a bounded window
+// so expanding one never freezes the panel.
+const MAX_CHILDREN = 200
+
+/**
+ * One row of a debug value, expandable when gdb printed an aggregate (a struct
+ * or array). Every line of text is exactly what gdb returned - expansion only
+ * re-lays-out that string as a tree, it never asks for or invents more data.
+ * `action` (a remove button, say) renders at the end of the root row only.
+ */
+function VarNode({
+  node,
+  depth,
+  action
+}: {
+  node: GdbNode
+  depth: number
+  action?: JSX.Element
+}): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const kids = node.children
+  const expandable = !!kids && kids.length > 0
+  const pad = 12 + depth * 14
+  return (
+    <>
+      <div
+        className="group row items-baseline gap-1 py-0.5 text-[11px]"
+        style={{ paddingLeft: pad, paddingRight: 12 }}
+      >
+        {expandable ? (
+          <button
+            className="grid h-3.5 w-3.5 shrink-0 place-items-center rounded text-ide-faint hover:text-ide-text"
+            onClick={() => setOpen((o) => !o)}
+            aria-expanded={open}
+            title={open ? 'Collapse' : 'Expand'}
+          >
+            {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+          </button>
+        ) : (
+          <span className="h-3.5 w-3.5 shrink-0" aria-hidden />
+        )}
+        {node.name && <span className="mono shrink-0 text-ide-cyan">{node.name}</span>}
+        <span className="mono truncate text-ide-text" title={node.value}>
+          {node.value}
+        </span>
+        {action}
+      </div>
+      {open &&
+        kids &&
+        kids
+          .slice(0, MAX_CHILDREN)
+          .map((c, i) => <VarNode key={(c.name ?? '') + i} node={c} depth={depth + 1} />)}
+      {open && kids && kids.length > MAX_CHILDREN && (
+        <div className="text-[10px] text-ide-faint" style={{ paddingLeft: pad + 14 }}>
+          {kids.length - MAX_CHILDREN} more not shown
+        </div>
+      )}
+    </>
+  )
+}
 
 function Section({
   title,
@@ -74,13 +136,17 @@ export default function DebugPanel(): JSX.Element {
   const running = debug.status === 'running'
   const active = stopped || running || debug.status === 'starting'
 
-  // Watch expressions, evaluated each time execution stops.
-  const [watch, setWatch] = useState<{ expr: string; value: string }[]>([])
+  // Watch expressions, evaluated each time execution stops. Each carries a
+  // stable id so its expand/collapse state (held in the child VarNode) follows
+  // the right row when an earlier watch is removed - an index key would leak a
+  // removed row's open-state onto its neighbour.
+  const [watch, setWatch] = useState<{ id: number; expr: string; value: string }[]>([])
+  const watchId = useRef(0)
   const [newExpr, setNewExpr] = useState('')
   useEffect(() => {
     if (!stopped || watch.length === 0) return
     let cancelled = false
-    void Promise.all(watch.map((w) => window.api.debugEvaluate(w.expr).then((value) => ({ expr: w.expr, value })))).then(
+    void Promise.all(watch.map((w) => window.api.debugEvaluate(w.expr).then((value) => ({ ...w, value })))).then(
       (rows) => {
         if (!cancelled) setWatch(rows)
       }
@@ -96,7 +162,7 @@ export default function DebugPanel(): JSX.Element {
     if (!expr) return
     setNewExpr('')
     const value = stopped ? await window.api.debugEvaluate(expr) : ''
-    setWatch((w) => [...w, { expr, value }])
+    setWatch((w) => [...w, { id: watchId.current++, expr, value }])
   }
 
   const ctrl = (Icon: typeof Play, label: string, onClick: () => void, enabled: boolean): JSX.Element => (
@@ -188,10 +254,7 @@ export default function DebugPanel(): JSX.Element {
               <div className="px-3 py-1 text-[11px] text-ide-faint">No variables in scope.</div>
             ) : (
               debug.variables.map((v) => (
-                <div key={v.name} className="row items-baseline gap-2 px-3 py-0.5 text-[11px]">
-                  <span className="mono shrink-0 text-ide-cyan">{v.name}</span>
-                  <span className="mono truncate text-ide-text">{v.value}</span>
-                </div>
+                <VarNode key={v.name} node={{ ...parseGdbValue(v.value), name: v.name }} depth={0} />
               ))
             )}
           </Section>
@@ -206,17 +269,22 @@ export default function DebugPanel(): JSX.Element {
                 onKeyDown={(e) => e.key === 'Enter' && void addWatch()}
               />
             </div>
-            {watch.map((w, i) => (
-              <div key={i} className="group row items-baseline gap-2 px-3 py-0.5 text-[11px]">
-                <span className="mono shrink-0 text-ide-cyan">{w.expr}</span>
-                <span className="mono truncate text-ide-text">{w.value || '...'}</span>
-                <button
-                  className="ml-auto shrink-0 text-ide-faint opacity-0 hover:text-ide-text group-hover:opacity-100"
-                  onClick={() => setWatch((ws) => ws.filter((_, j) => j !== i))}
-                >
-                  <X size={11} />
-                </button>
-              </div>
+            {watch.map((w) => (
+              <VarNode
+                key={w.id}
+                node={{ ...parseGdbValue(w.value || '...'), name: w.expr }}
+                depth={0}
+                action={
+                  <button
+                    className="ml-auto shrink-0 text-ide-faint opacity-0 hover:text-ide-text group-hover:opacity-100"
+                    onClick={() => setWatch((ws) => ws.filter((x) => x.id !== w.id))}
+                    title="Remove watch"
+                    aria-label="Remove watch"
+                  >
+                    <X size={11} />
+                  </button>
+                }
+              />
             ))}
           </Section>
 
