@@ -204,7 +204,11 @@ export default function App(): JSX.Element {
         setMainView('settings')
       } else if (mod && !e.shiftKey && e.key.toLowerCase() === 't') {
         // Auto Format (advertised in the Sketch menu); real now that a
-        // formatting provider is registered for C/C++/Rust.
+        // formatting provider is registered for C/C++/Rust. Only when the editor
+        // is the visible surface: it is kept mounted behind the Simulator /
+        // Settings, so an unguarded format would silently reformat and dirty the
+        // hidden document.
+        if (useStore.getState().mainView !== 'editor') return
         e.preventDefault()
         runEditorAction('editor.action.formatDocument')
       } else if (e.key === 'F5') {
@@ -263,12 +267,18 @@ export default function App(): JSX.Element {
             </>
           )}
           <div className="flex min-w-0 flex-1 flex-col">
-            {mainView === 'simulator' ? (
-              <SimulatorView />
-            ) : mainView === 'settings' ? (
-              <SettingsView />
-            ) : workspaceRoot ? (
-              <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
+            {/* The editor stays MOUNTED across view switches (hidden, not
+                unmounted) so Monaco keeps each file's undo history, scroll and
+                cursor when you dip into the Simulator or Settings and come back
+                - remounting it discarded all three. A ResizeObserver in
+                CodeEditor relayouts the editor when it is shown again. The
+                Tailwind `hidden` utility (display:none) is used deliberately
+                instead of the bare [hidden] attribute, which a `flex` class
+                would override. */}
+            {workspaceRoot && (
+              <div
+                className={mainView === 'editor' ? 'flex min-h-0 min-w-0 flex-1 flex-col gap-2' : 'hidden'}
+              >
                 <EditorArea />
                 {bottomVisible && (
                   <>
@@ -277,9 +287,10 @@ export default function App(): JSX.Element {
                   </>
                 )}
               </div>
-            ) : (
-              <Welcome />
             )}
+            {mainView === 'simulator' && <SimulatorView />}
+            {mainView === 'settings' && <SettingsView />}
+            {mainView === 'editor' && !workspaceRoot && <Welcome />}
           </div>
           {/* Right dock: the Agent or the Datasheets, whichever the right rail
               selected. One splitter/width serves both. */}

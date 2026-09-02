@@ -83,11 +83,21 @@ raw `-O0/-Os` → Debug / Balanced / Release / Size. raw `g++/clang++` → GCC /
 
 ## Known engineering debt (tracked)
 
-- Switching the main view (to the Simulator or, since 6a, to Settings) unmounts
-  and remounts the editor, so Monaco loses in-file undo history / scroll / cursor
-  (pre-existing for the Simulator; 6a adds Settings as a second trigger). Fix in
-  a later slice: keep EditorArea mounted and toggle visibility (`hidden`) instead
-  of swapping it out, so editor state survives a view switch.
+- ~~Switching the main view (to the Simulator or, since 6a, to Settings) unmounts
+  and remounts the editor, so Monaco loses in-file undo history / scroll / cursor.~~
+  **RESOLVED.** App.tsx now keeps the editor column MOUNTED across view switches
+  and toggles it with the Tailwind `hidden` utility (display:none) when
+  `mainView !== 'editor'`; the Simulator / Settings render as siblings. The
+  Monaco model is not disposed while hidden, so undo / scroll / cursor survive,
+  and CodeEditor's ResizeObserver relayouts on show. Review-caught follow-ons,
+  both fixed: a reveal into a hidden (0x0) editor now `editor.layout()`s before
+  `revealLineInCenter` so it centers rather than racing the show-relayout; and
+  Ctrl+T (Format) is gated on `mainView === 'editor'` since `__cortexEditor` no
+  longer clears on a view switch. Live-verified via CDP (same Monaco instance
+  across editor->settings->simulator->editor; cursor + scroll + undo preserved;
+  reveal centers at ~0.57 of the viewport). Deliberately NOT restored: the
+  terminal's auto-focus-on-return (the old remount stole focus back to the
+  terminal; not stealing it is the better behavior).
 
 ## Known a11y debt (tracked, from the slice-2b review)
 

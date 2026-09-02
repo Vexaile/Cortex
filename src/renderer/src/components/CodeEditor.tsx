@@ -251,10 +251,16 @@ export default function CodeEditor({ path }: { path: string }): JSX.Element {
     }
   }, [activePath, path, mountNonce])
 
-  // Jump to a location when the Problems panel requests a reveal for this file.
+  // Jump to a location when a panel requests a reveal for this file.
   useEffect(() => {
     const editor = editorRef.current
     if (!editor || !reveal || norm(reveal.path) !== norm(path)) return
+    // The editor is kept mounted-but-hidden behind the Simulator/Settings, so a
+    // reveal from a still-visible panel (Debug, Search, Datasheets) can fire the
+    // frame the editor is shown again, while Monaco's viewport is still 0x0.
+    // Force a relayout first so revealLineInCenter measures the real height and
+    // truly centers, instead of racing the show-relayout and pinning to the top.
+    editor.layout()
     editor.revealLineInCenter(reveal.line)
     editor.setPosition({ lineNumber: reveal.line, column: reveal.column })
     editor.focus()
