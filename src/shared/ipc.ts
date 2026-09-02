@@ -96,6 +96,8 @@ export const IPC = {
   GIT_UNSTAGE: 'git:unstage',
   GIT_COMMIT: 'git:commit',
   GIT_PUSH: 'git:push',
+  GIT_BRANCHES: 'git:branches',
+  GIT_SWITCH: 'git:switch',
 
   // Simulator (Wokwi/Tinkercad-style native simulation)
   SIM_START: 'sim:start',
@@ -516,6 +518,11 @@ export type GitDiffKind = 'staged' | 'unstaged' | 'untracked'
 export interface GitOpResult {
   ok: boolean
   error?: string
+}
+/** Local branches and the current one (null when detached / not a repo). */
+export interface GitBranches {
+  current: string | null
+  branches: string[]
 }
 /** One file's diff as two contents for the shared DiffView. The pair depends on
  *  the kind: staged = HEAD (or the rename origin) vs the index; unstaged = the

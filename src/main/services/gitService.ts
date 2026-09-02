@@ -2,7 +2,7 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { readFile } from 'fs/promises'
 import { join } from 'path'
-import type { GitStatus, GitFileDiff, GitDiffKind, GitOpResult } from '../../shared/ipc'
+import type { GitStatus, GitFileDiff, GitDiffKind, GitOpResult, GitBranches } from '../../shared/ipc'
 import { parsePorcelain } from '../../shared/gitStatus'
 import { getWorkspaceRoot, withinWorkspace } from './fsService'
 import { safeCommand, needsShell } from './commandResolver'
@@ -228,4 +228,29 @@ export async function push(): Promise<GitOpResult> {
   const root = await repoRoot()
   if (!root) return { ok: false, error: 'Not a git repository.' }
   return runMutation(root, ['push'])
+}
+
+/** Local branches + the current one. Branch names cannot contain a newline, so
+ *  newline-splitting for-each-ref output is safe. */
+export async function branches(): Promise<GitBranches> {
+  const root = await repoRoot()
+  if (!root) return { current: null, branches: [] }
+  const cur = await runGit(root, ['branch', '--show-current'])
+  const list = await runGit(root, ['for-each-ref', '--format=%(refname:short)', 'refs/heads'])
+  const names = list.ok ? list.stdout.split('\n').map((s) => s.trim()).filter(Boolean) : []
+  return { current: cur.ok ? cur.stdout.trim() || null : null, branches: names }
+}
+
+/** Switch to an existing local branch. `git switch` refuses (does not force) when
+ *  local changes would be overwritten, surfacing that as an honest error; the
+ *  caller separately guards unsaved editor buffers (invisible to git). */
+export async function switchBranch(name: string): Promise<GitOpResult> {
+  const root = await repoRoot()
+  if (!root) return { ok: false, error: 'Not a git repository.' }
+  // The name comes from branches() (git's own output), but validate anyway: no
+  // control chars, not empty/oversized, and never a leading '-' (which would be
+  // read as an option since there is no shell to abuse).
+  if (typeof name !== 'string' || name.length === 0 || name.length > 255 || /[\r\n\0]/.test(name) || name.startsWith('-'))
+    return { ok: false, error: 'Invalid branch name.' }
+  return runMutation(root, ['switch', name])
 }

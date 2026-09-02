@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { GitBranch, RefreshCw, ArrowUp, ArrowDown, Plus, Minus, Check } from 'lucide-react'
+import { GitBranch, RefreshCw, ArrowUp, ArrowDown, Plus, Minus, Check, ChevronDown } from 'lucide-react'
 import PanelHeader from './PanelHeader'
 import DiffView from './DiffView'
 import { useStore } from '../store/useStore'
-import type { GitStatus, GitFileStatus, GitFileDiff, GitDiffKind, GitOpResult } from '@shared/ipc'
+import type { GitStatus, GitFileStatus, GitFileDiff, GitDiffKind, GitOpResult, GitBranches } from '@shared/ipc'
 
 const baseName = (p: string): string => p.replace(/\\/g, '/').replace(/\/$/, '').split('/').pop() || p
 const dirOf = (p: string): string => {
@@ -60,6 +60,11 @@ export default function VcsPanel(): JSX.Element {
   const workspaceRoot = useStore((s) => s.workspaceRoot)
   const notify = useStore((s) => s.notify)
   const confirm = useStore((s) => s.confirm)
+  const tabs = useStore((s) => s.tabs)
+  const reloadOpenTabsFromDisk = useStore((s) => s.reloadOpenTabsFromDisk)
+  const refreshTree = useStore((s) => s.refreshTree)
+  const [branchMenu, setBranchMenu] = useState(false)
+  const [branchList, setBranchList] = useState<GitBranches | null>(null)
   const [status, setStatus] = useState<GitStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -187,6 +192,32 @@ export default function VcsPanel(): JSX.Element {
     else notify('error', 'Push failed', r.error)
   }
 
+  const openBranchMenu = async (): Promise<void> => {
+    setBranchList(null)
+    setBranchMenu(true)
+    setBranchList(await window.api.gitBranches())
+  }
+
+  const doSwitch = async (name: string): Promise<void> => {
+    setBranchMenu(false)
+    if (busy || name === branchList?.current) return
+    // git only sees the DISK; an unsaved editor buffer would be silently
+    // clobbered by the checkout, so refuse until the user saves or discards.
+    if (tabs.some((t) => t.content !== t.savedContent)) {
+      notify('info', 'Cannot switch branch', 'Save or discard your open changes first.')
+      return
+    }
+    const r = await doOp(() => window.api.gitSwitch(name))
+    if (r.ok) {
+      // The checkout rewrote files on disk; bring open tabs + the tree in sync.
+      await reloadOpenTabsFromDisk()
+      await refreshTree()
+      notify('success', 'Switched branch', name)
+    } else {
+      notify('error', 'Could not switch branch', r.error)
+    }
+  }
+
   const header = (
     <PanelHeader
       icon={<GitBranch size={13} />}
@@ -252,9 +283,52 @@ export default function VcsPanel(): JSX.Element {
     <div className="flex min-h-0 flex-1 flex-col">
       {header}
       {status?.branch && (
-        <div className="row items-center gap-1.5 border-b border-ide-border/60 px-3 py-1 text-[11px]">
-          <GitBranch size={12} className="shrink-0 text-ide-faint" />
-          <span className="truncate text-ide-text">{status.branch}</span>
+        <div className="relative row items-center gap-1.5 border-b border-ide-border/60 px-3 py-1 text-[11px]">
+          <button
+            className="row -mx-1 min-w-0 items-center gap-1.5 rounded px-1 py-0.5 text-ide-text enabled:hover:bg-ide-hover disabled:cursor-not-allowed"
+            onClick={() => void openBranchMenu()}
+            disabled={busy}
+            title="Switch branch"
+          >
+            <GitBranch size={12} className="shrink-0 text-ide-faint" />
+            <span className="truncate">{status.branch}</span>
+            <ChevronDown size={11} className="shrink-0 text-ide-faint" />
+          </button>
+          {branchMenu && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setBranchMenu(false)} />
+              <div
+                role="menu"
+                className="absolute left-2 top-7 z-50 max-h-64 w-56 overflow-auto rounded-md border border-ide-border bg-ide-panel py-1 shadow-xl"
+              >
+                <div className="px-3 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-wider text-ide-faint">
+                  Switch branch
+                </div>
+                {branchList === null ? (
+                  <div className="px-3 py-1 text-[11px] text-ide-faint">Loading...</div>
+                ) : branchList.branches.length === 0 ? (
+                  <div className="px-3 py-1 text-[11px] text-ide-faint">No local branches.</div>
+                ) : (
+                  branchList.branches.map((b) => {
+                    const isCurrent = b === branchList.current
+                    return (
+                      <button
+                        key={b}
+                        role="menuitem"
+                        disabled={busy || isCurrent}
+                        className="row w-full items-center gap-2 px-3 py-1 text-left text-[12px] enabled:hover:bg-ide-hover disabled:cursor-default"
+                        onClick={() => void doSwitch(b)}
+                        title={isCurrent ? 'Current branch' : `Switch to ${b}`}
+                      >
+                        <span className="w-3 shrink-0">{isCurrent && <Check size={12} className="text-ide-accent" />}</span>
+                        <span className={`truncate ${isCurrent ? 'text-ide-text' : 'text-ide-muted'}`}>{b}</span>
+                      </button>
+                    )
+                  })
+                )}
+              </div>
+            </>
+          )}
           {status.behind > 0 && (
             <span className="row items-center text-ide-faint" title={`${status.behind} behind ${status.upstream ?? 'upstream'}`}>
               <ArrowDown size={11} />

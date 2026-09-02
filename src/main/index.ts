@@ -723,6 +723,8 @@ function registerIpc(): void {
   ipcMain.handle(IPC.GIT_UNSTAGE, (_e, paths: string[]) => git.unstage(paths))
   ipcMain.handle(IPC.GIT_COMMIT, (_e, message: string) => git.commit(message))
   ipcMain.handle(IPC.GIT_PUSH, () => git.push())
+  ipcMain.handle(IPC.GIT_BRANCHES, () => git.branches())
+  ipcMain.handle(IPC.GIT_SWITCH, (_e, name: string) => git.switchBranch(name))
 
   // ---- settings / app ----
   // Return redacted settings only: the raw API key never crosses to the renderer.

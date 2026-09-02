@@ -24,7 +24,7 @@ import { extractMissingHeaders, type EnvironmentReport } from '@shared/environme
 import { restorePlan, type LockCheck } from '@shared/lockfile'
 import type { DatasheetHit, DatasheetDocMeta } from '@shared/datasheet'
 import type { LspAvailability } from '@shared/lsp'
-import type { DebugState, DebugOutput } from '@shared/ipc'
+import type { DebugState, DebugOutput, FileReadResult } from '@shared/ipc'
 
 const IDLE_DEBUG: DebugState = { status: 'idle', stack: [], frame: 0, variables: [] }
 import { extractSeries } from '@shared/serialPlot'
@@ -612,6 +612,10 @@ interface State {
    *  savedContent to the new text, so it shows the change and is not falsely
    *  marked dirty. No-op if the file has no open tab. */
   applyExternalEdit: (path: string, content: string) => void
+  /** Re-sync every open tab with disk after the working tree changed underneath
+   *  the editor (a branch switch): reload clean tabs, close ones whose file is
+   *  gone. The caller must first ensure no tab has UNSAVED edits. */
+  reloadOpenTabsFromDisk: () => Promise<void>
   saveActive: () => Promise<void>
   saveAll: () => Promise<void>
   renameEntry: (path: string, newName: string) => Promise<void>
@@ -1165,6 +1169,38 @@ export const useStore = create<State>((set, get) => ({
         normPath(t.path) === normPath(path) ? { ...t, content, savedContent: content } : t
       )
     })
+  },
+  async reloadOpenTabsFromDisk() {
+    // The working tree changed underneath the editor (a branch switch). Bring
+    // each open tab back in sync with disk. The caller checks for unsaved edits
+    // BEFORE the switch, but the editor stays live during the async checkout, so
+    // re-check each tab LIVE here and NEVER overwrite one that is dirty now - a
+    // clean tab is safe to adopt (and to close, since closeTab only saves dirty
+    // tabs), a dirty one keeps the user's in-flight edit.
+    const paths = get().tabs.map((t) => t.path)
+    const live = (p: string): Tab | undefined => get().tabs.find((t) => normPath(t.path) === normPath(p))
+    for (const p of paths) {
+      const t0 = live(p)
+      if (!t0 || t0.content !== t0.savedContent) continue // gone from the list, or edited during the switch
+      let r: FileReadResult
+      try {
+        r = await window.api.readFile(p)
+      } catch {
+        await get().closeTab(p) // file no longer exists on the new tree
+        continue
+      }
+      const t = live(p)
+      if (!t || t.content !== t.savedContent) continue // became dirty during the read
+      if (r.kind === 'text') {
+        if (t.readOnlyReason) await get().closeTab(p) // was a placeholder, now editable text: drop the stale placeholder
+        else get().applyExternalEdit(p, r.content) // clean editable text: adopt the new content
+      } else if (!t.readOnlyReason) {
+        // was editable text, now binary/too-large: the stale editable buffer
+        // would overwrite the new file on save, so drop it (it is clean).
+        await get().closeTab(p)
+      }
+      // else: still a read-only placeholder - leave it.
+    }
   },
 
   async saveActive() {
