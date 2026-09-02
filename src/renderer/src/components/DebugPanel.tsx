@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Bug,
   Play,
@@ -16,10 +16,14 @@ import PanelHeader from './PanelHeader'
 import { useStore, isSketch } from '../store/useStore'
 import { isHeaderPath } from '@shared/languages'
 import { parseGdbValue, type GdbNode } from '@shared/gdbValue'
+import { stepHistory } from '@shared/replHistory'
 
 // A single array/struct can list thousands of elements; render a bounded window
 // so expanding one never freezes the panel.
 const MAX_CHILDREN = 200
+
+// Keep the console log bounded so a long session cannot grow it without limit.
+const CONSOLE_MAX = 200
 
 /**
  * One row of a debug value, expandable when gdb printed an aggregate (a struct
@@ -165,6 +169,78 @@ export default function DebugPanel(): JSX.Element {
     setWatch((w) => [...w, { id: watchId.current++, expr, value }])
   }
 
+  // Debug console: a one-shot REPL over the SAME gdb evaluate the Watch panel
+  // uses. Unlike a watch it does not persist across stops or auto-re-evaluate -
+  // it is a log of "what was `x` at that moment". Only real evaluate results are
+  // shown; nothing is fabricated, and the input is inert unless execution is
+  // paused (gdb cannot evaluate a running inferior). The result renders as a
+  // VarNode so a struct/array answer is as inspectable as a variable.
+  const [conLog, setConLog] = useState<{ id: number; expr: string; value: string; pending: boolean }[]>([])
+  const conId = useRef(0)
+  const [conInput, setConInput] = useState('')
+  const conHist = useRef<string[]>([])
+  const conHistIdx = useRef(-1) // -1 while editing a fresh line
+
+  // A new gdb session starts fresh: drop the previous session's console log and
+  // history so a dead process's frozen results never masquerade as the current
+  // stop (unlike Watch, the console does not re-evaluate). conId stays monotonic
+  // so React keys never collide across the reset.
+  useEffect(() => {
+    if (debug.status === 'starting') {
+      setConLog([])
+      conHist.current = []
+      conHistIdx.current = -1
+    }
+  }, [debug.status])
+
+  const runConsole = async (): Promise<void> => {
+    const expr = conInput.trim()
+    if (!expr || !stopped) return
+    setConInput('')
+    conHist.current = [...conHist.current, expr]
+    conHistIdx.current = -1
+    const id = conId.current++
+    // Echo the entry immediately as pending, then fill in gdb's real answer.
+    // `pending` is tracked separately from the value so a genuinely empty result
+    // is not mistaken for "still evaluating".
+    setConLog((l) => [...l, { id, expr, value: '', pending: true }].slice(-CONSOLE_MAX))
+    const value = await window.api.debugEvaluate(expr)
+    setConLog((l) => l.map((e) => (e.id === id ? { ...e, value, pending: false } : e)))
+  }
+
+  const onConsoleKey = (e: React.KeyboardEvent<HTMLInputElement>): void => {
+    if (e.key === 'Enter') {
+      void runConsole()
+      return
+    }
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
+    const r = stepHistory(conHist.current, conHistIdx.current, e.key === 'ArrowUp' ? 'up' : 'down')
+    conHistIdx.current = r.index
+    // input === null means there was nothing to navigate; leave the caret/field
+    // alone (and let the arrow key do its default thing).
+    if (r.input !== null) {
+      e.preventDefault()
+      setConInput(r.input)
+    }
+  }
+
+  // Parse gdb value strings into trees ONCE per data change, not on every
+  // render: typing in an input re-renders this panel on each keystroke, and
+  // parseGdbValue recurses over struct/array strings. Memoizing keeps that work
+  // off the keystroke path (CLAUDE.md section 19).
+  const varNodes = useMemo(
+    () => debug.variables.map((v) => ({ ...parseGdbValue(v.value), name: v.name })),
+    [debug.variables]
+  )
+  const watchNodes = useMemo(
+    () => watch.map((w) => ({ id: w.id, node: { ...parseGdbValue(w.value || '...'), name: w.expr } })),
+    [watch]
+  )
+  const conNodes = useMemo(
+    () => conLog.map((e) => ({ id: e.id, expr: e.expr, pending: e.pending, node: parseGdbValue(e.value) })),
+    [conLog]
+  )
+
   const ctrl = (Icon: typeof Play, label: string, onClick: () => void, enabled: boolean): JSX.Element => (
     <button
       title={label}
@@ -250,12 +326,10 @@ export default function DebugPanel(): JSX.Element {
           </Section>
 
           <Section title="Variables" count={debug.variables.length}>
-            {debug.variables.length === 0 ? (
+            {varNodes.length === 0 ? (
               <div className="px-3 py-1 text-[11px] text-ide-faint">No variables in scope.</div>
             ) : (
-              debug.variables.map((v) => (
-                <VarNode key={v.name} node={{ ...parseGdbValue(v.value), name: v.name }} depth={0} />
-              ))
+              varNodes.map((node) => <VarNode key={node.name} node={node} depth={0} />)
             )}
           </Section>
 
@@ -269,10 +343,10 @@ export default function DebugPanel(): JSX.Element {
                 onKeyDown={(e) => e.key === 'Enter' && void addWatch()}
               />
             </div>
-            {watch.map((w) => (
+            {watchNodes.map((w) => (
               <VarNode
                 key={w.id}
-                node={{ ...parseGdbValue(w.value || '...'), name: w.expr }}
+                node={w.node}
                 depth={0}
                 action={
                   <button
@@ -311,6 +385,57 @@ export default function DebugPanel(): JSX.Element {
                 </div>
               ))
             )}
+          </Section>
+
+          <Section title="Console" count={conLog.length}>
+            <div className="row items-center gap-1.5 px-3 py-1">
+              <span className="shrink-0 text-[11px] text-ide-faint">{'>'}</span>
+              <input
+                className="mono h-6 min-w-0 flex-1 rounded border border-ide-border bg-ide-bg px-2 text-[11px] text-ide-text outline-none placeholder:text-ide-faint disabled:cursor-not-allowed disabled:opacity-50"
+                placeholder={stopped ? 'Evaluate expression...' : 'Pause execution to evaluate'}
+                value={conInput}
+                disabled={!stopped}
+                onChange={(e) => setConInput(e.target.value)}
+                onKeyDown={onConsoleKey}
+                title={stopped ? 'Evaluate a gdb expression in the selected frame' : 'Available while paused at a breakpoint'}
+              />
+              {conLog.length > 0 && (
+                <button
+                  className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-ide-faint hover:bg-ide-hover hover:text-ide-text"
+                  onClick={() => setConLog([])}
+                  title="Clear console"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            {conLog.length === 0 && (
+              <div className="px-3 pb-1 text-[11px] text-ide-faint">
+                {stopped
+                  ? 'Evaluate an expression in the selected frame. Results reflect the current stop.'
+                  : 'Pause at a breakpoint to evaluate expressions.'}
+              </div>
+            )}
+            {conNodes
+              .slice()
+              .reverse()
+              .map((e) => (
+                <div key={e.id} className="border-t border-ide-border/40 pb-0.5">
+                  <div className="row items-baseline gap-1.5 px-3 pt-1 text-[11px]">
+                    <span className="shrink-0 text-ide-faint">{'>'}</span>
+                    <span className="mono truncate text-ide-muted" title={e.expr}>
+                      {e.expr}
+                    </span>
+                  </div>
+                  {e.pending ? (
+                    <div className="mono px-3 py-0.5 text-[11px] text-ide-faint" style={{ paddingLeft: 26 }}>
+                      evaluating...
+                    </div>
+                  ) : (
+                    <VarNode node={e.node} depth={1} />
+                  )}
+                </div>
+              ))}
           </Section>
         </div>
       )}
