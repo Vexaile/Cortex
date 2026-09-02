@@ -445,6 +445,8 @@ interface State {
   // editor
   tabs: Tab[]
   activePath: string | null
+  /** 1-based cursor position in the focused editor, or null when none is focused. */
+  cursorPos: { line: number; column: number } | null
   /** Which editor group has focus (0 or 1). activePath is always the active
    *  tab of this group. */
   activeGroup: number
@@ -586,6 +588,8 @@ interface State {
   /** Reorder a tab within its own group (drag-to-reorder). */
   reorderTab: (path: string, toIndex: number) => void
   updateContent: (path: string, content: string) => void
+  /** Report the focused editor's cursor position for the status bar. */
+  setCursor: (pos: { line: number; column: number } | null) => void
   /** Reflect a change made to a file outside the editor (e.g. a rename
    *  refactor that already rewrote it on disk): set the tab's content AND
    *  savedContent to the new text, so it shows the change and is not falsely
@@ -809,6 +813,7 @@ export const useStore = create<State>((set, get) => ({
 
   tabs: [],
   activePath: null,
+  cursorPos: null,
   activeGroup: 0,
   groupActive: {},
 
@@ -1079,6 +1084,13 @@ export const useStore = create<State>((set, get) => ({
 
   setActive(path) {
     set(groupPatch(focusPathInGroups(get(), path)))
+  },
+  setCursor(pos) {
+    // Skip no-op writes so a click that lands on the same spot does not churn
+    // the store (the status bar subscribes to this).
+    const cur = get().cursorPos
+    if (cur?.line === pos?.line && cur?.column === pos?.column) return
+    set({ cursorPos: pos })
   },
 
   setActiveInGroup(group, path) {

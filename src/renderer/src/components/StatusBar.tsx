@@ -1,6 +1,7 @@
-import { Folder, CircleDot, Cpu, Radio, AlertCircle, CheckCircle2, Braces, MemoryStick } from 'lucide-react'
+import { Folder, CircleDot, Radio, AlertCircle, CheckCircle2, Braces, MemoryStick } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { langForFile, LSP_SERVER_LABEL, LSP_INSTALL_HINT, LSP_BUSY_HINT } from '@shared/lsp'
+import { lineEnding } from '@shared/textInfo'
 
 export default function StatusBar(): JSX.Element {
   const {
@@ -11,17 +12,17 @@ export default function StatusBar(): JSX.Element {
     lastExitCode,
     serialOpen,
     serialPath,
-    toolchains,
     workspaceName,
     setSidebar,
     simRunning,
     lspServers,
     lspBusy,
-    projectModel
+    projectModel,
+    cursorPos,
+    mainView
   } = useStore()
   const board = projectModel?.boards[0]
   const activeTab = tabs.find((t) => t.path === activePath)
-  const availCount = toolchains.filter((t) => t.available).length
   // Language-server status for the active file. Null for files no server handles
   // (.ino, .md, ...), so the indicator stays out of the way when irrelevant.
   const lspLang = activePath ? langForFile(activePath) : null
@@ -71,14 +72,6 @@ export default function StatusBar(): JSX.Element {
         >
           <Radio size={12} className={serialOpen ? 'text-ide-moss' : ''} /> {serialOpen ? serialPath : 'serial off'}
         </button>
-        <button
-          className="row gap-1 rounded px-1 hover:bg-ide-hover hover:text-ide-text"
-          onClick={() => setSidebar('settings')}
-          title="Toolchains & Build settings"
-        >
-          {/* Empty list means detection has not finished yet; "0 toolchains" would read as a failure. */}
-          <Cpu size={12} /> {toolchains.length === 0 ? 'detecting toolchains...' : `${availCount} toolchains`}
-        </button>
         {/* Read from platformio.ini, not guessed - see projectModelService.
             Absent for a project that doesn't have one, rather than a wrong board. */}
         {board && (
@@ -107,7 +100,16 @@ export default function StatusBar(): JSX.Element {
         {activeTab && (
           <>
             <span>{activeTab.language.label}</span>
-            <span>UTF-8</span>
+            {/* Real, from the file's own content - not a hardcoded "UTF-8". */}
+            <span title="Line endings">{lineEnding(activeTab.content)}</span>
+            {/* Only while the editor is up: the readout is a live editor cursor,
+                not a stale value carried into the Simulator. It is retained (not
+                cleared) across a tab switch so the segment never blinks out. */}
+            {cursorPos && mainView === 'editor' && (
+              <span className="mono tabular-nums" title="Line and column">
+                Ln {cursorPos.line}, Col {cursorPos.column}
+              </span>
+            )}
             <span className={activeTab.content !== activeTab.savedContent ? 'text-ide-amber' : ''}>
               {activeTab.content !== activeTab.savedContent ? '● unsaved' : 'saved'}
             </span>

@@ -151,6 +151,7 @@ export default function CodeEditor({ path }: { path: string }): JSX.Element {
   const diagnostics = useStore((s) => s.diagnostics)
   const reveal = useStore((s) => s.reveal)
   const clearReveal = useStore((s) => s.clearReveal)
+  const setCursor = useStore((s) => s.setCursor)
   const workspaceRoot = useStore((s) => s.workspaceRoot)
   const breakpoints = useStore((s) => s.breakpoints)
   const debug = useStore((s) => s.debug)
@@ -285,6 +286,12 @@ export default function CodeEditor({ path }: { path: string }): JSX.Element {
         editorRef.current = editor
         monacoRef.current = m
         modelRef.current = editor.getModel()
+        // Report the cursor to the status bar: the initial position on mount,
+        // then every move. Cleared on dispose (below) so switching to the
+        // Simulator or closing the last file empties the Ln/Col readout.
+        const p0 = editor.getPosition()
+        if (p0) setCursor({ line: p0.lineNumber, column: p0.column })
+        editor.onDidChangeCursorPosition((e) => setCursor({ line: e.position.lineNumber, column: e.position.column }))
         // Start the language server for this file (if one is installed) and open
         // the document. initLsp is idempotent; openDoc is a no-op for languages
         // with no server, so the editor degrades to plain highlighting.
@@ -299,9 +306,13 @@ export default function CodeEditor({ path }: { path: string }): JSX.Element {
         const w = window as unknown as { __cortexEditor?: typeof editor }
         w.__cortexEditor = editor
         // With a split editor two instances are mounted; the focused one is the
-        // one the menu/format/rename actions should drive, so track focus.
+        // one the menu/format/rename actions should drive, so track focus. Also
+        // re-report the cursor on focus so the Ln/Col readout follows the pane
+        // you switch to even when you do not move the caret.
         editor.onDidFocusEditorText(() => {
           w.__cortexEditor = editor
+          const p = editor.getPosition()
+          if (p) setCursor({ line: p.lineNumber, column: p.column })
         })
         // Monaco's automaticLayout observes the editor's own node, which it pins
         // to its measured size. Inside the framed flex "island" the container
@@ -322,6 +333,12 @@ export default function CodeEditor({ path }: { path: string }): JSX.Element {
         editor.onDidDispose(() => {
           ro.disconnect()
           if (w.__cortexEditor === editor) delete w.__cortexEditor
+          // Deliberately do NOT clear cursorPos here: on a tab switch the old
+          // editor disposes synchronously while the new one mounts async, so a
+          // clear would blank the Ln/Col readout for several frames and jitter
+          // the status bar on the most common action. The readout is instead
+          // hidden by the status bar when the editor view is not up, and the
+          // next mount/focus overwrites the retained position.
         })
         editor.addCommand(m.KeyMod.CtrlCmd | m.KeyCode.KeyS, () => void saveActive())
         editor.addCommand(m.KeyCode.F5, () => void runActive())
