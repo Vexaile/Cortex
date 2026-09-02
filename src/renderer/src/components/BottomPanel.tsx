@@ -60,7 +60,7 @@ export default function BottomPanel(): JSX.Element {
               <Icon size={14} className="shrink-0" />
               <span className="cq-label">{label}</span>
               {view === 'problems' && problemCount > 0 && (
-                <span className="ml-0.5 rounded-full bg-ide-red/80 px-1.5 text-[10px] text-white">
+                <span className="ml-0.5 rounded-full bg-ide-danger px-1.5 text-[10px] text-white">
                   {problemCount}
                 </span>
               )}

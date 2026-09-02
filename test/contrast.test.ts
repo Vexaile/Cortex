@@ -68,6 +68,14 @@ export function contrast(a: string, b: string): number {
   return (hi + 0.05) / (lo + 0.05)
 }
 
+/** Alpha-composite fg over bg, matching how Tailwind renders a `/15` tint
+ *  (`rgb(var(--hue) / .15)`) over a surface: bg*(1-a) + fg*a per channel. */
+function over(fgHex: string, bgHex: string, alpha: number): string {
+  const ch = (h: string, i: number): number => parseInt(h.slice(i, i + 2), 16)
+  const mix = (i: number): number => Math.round(ch(bgHex, i) * (1 - alpha) + ch(fgHex, i) * alpha)
+  return '#' + [1, 3, 5].map((i) => mix(i).toString(16).padStart(2, '0')).join('')
+}
+
 const AA_TEXT = 4.5
 /** WCAG 1.4.11: icons and other non-text carry a lower bar. */
 const AA_GRAPHIC = 3
@@ -130,6 +138,30 @@ describe.each(THEMES)('WCAG contrast (%s)', (_theme, pal) => {
   // one so this stays above 4.5:1.
   it('white button text clears AA on the accent', () => {
     expect(contrast('#FFFFFF', tok(pal, 'accent'))).toBeGreaterThanOrEqual(AA_TEXT)
+  })
+})
+
+// Status / severity badges render text-ide-on-HUE on a bg-ide-HUE/15 tint. The
+// label token is decoupled from the tint so it clears AA against the COMPOSITED
+// background - the solid same-hue label does not. Checked over both panel and bg
+// (the worse surface) in both themes, so a palette nudge can never silently drop
+// a badge under AA again. The solid danger surface (white Stop / Disconnect
+// text) is pinned too: the old bg-ide-red/80 and /90 composites each failed AA
+// in one theme.
+const TINT_HUES = ['red', 'amber', 'moss']
+describe.each(THEMES)('WCAG composite badge contrast (%s)', (_theme, pal) => {
+  // Checked at the heaviest tint anyone uses (/30, e.g. SimCanvas armed pins)
+  // over every surface a badge can sit on; lighter tints (/10 .. /20) are then
+  // guaranteed too. Keeps the label AA no matter which HUE/<=30 tint uses it.
+  it.each(TINT_HUES)('on-%s clears AA on a same-hue tint up to /30 (panel, bg, bar)', (hue) => {
+    for (const surf of ['panel', 'bg', 'bar']) {
+      const tint = over(tok(pal, hue), tok(pal, surf), 0.3)
+      expect(contrast(tok(pal, `on-${hue}`), tint)).toBeGreaterThanOrEqual(AA_TEXT)
+    }
+  })
+
+  it('white text clears AA on the solid danger surface', () => {
+    expect(contrast('#FFFFFF', tok(pal, 'danger'))).toBeGreaterThanOrEqual(AA_TEXT)
   })
 })
 

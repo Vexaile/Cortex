@@ -140,7 +140,7 @@ export default function AgentView(): JSX.Element {
             }}
           />
           {agentRunning ? (
-            <button className="btn self-end bg-ide-red/90 text-white" onClick={cancelAgent} title="Stop the agent">
+            <button className="btn self-end bg-ide-danger text-white" onClick={cancelAgent} title="Stop the agent">
               <Square size={14} />
             </button>
           ) : (
@@ -177,7 +177,7 @@ function Entry({ entry, edits, root }: { entry: AgentEntry; edits: AgentEdit[]; 
   }
   if (entry.type === 'error') {
     return (
-      <div className="rounded-lg border border-ide-red/40 bg-ide-red/10 px-3 py-2 text-[12px] leading-relaxed text-ide-red">
+      <div className="rounded-lg border border-ide-red/40 bg-ide-red/10 px-3 py-2 text-[12px] leading-relaxed text-ide-on-red">
         {entry.text}
       </div>
     )
@@ -230,7 +230,7 @@ function EditCard({ edit, root }: { edit: AgentEdit; root: string | null }): JSX
         {edit.status === 'pending' ? (
           <div className="row shrink-0 gap-1">
             <button
-              className="btn border border-ide-moss/50 bg-ide-moss/15 px-2 py-0.5 text-[11px] text-ide-moss hover:bg-ide-moss/25"
+              className="btn border border-ide-moss/50 bg-ide-moss/15 px-2 py-0.5 text-[11px] text-ide-on-moss hover:bg-ide-moss/25"
               onClick={() => void approveAgentEdit(edit.id)}
               title="Apply this edit"
             >
@@ -252,11 +252,11 @@ function EditCard({ edit, root }: { edit: AgentEdit; root: string | null }): JSX
           <span
             className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] ${
               edit.status === 'approved'
-                ? 'bg-ide-moss/15 text-ide-moss'
+                ? 'bg-ide-moss/15 text-ide-on-moss'
                 : edit.status === 'failed'
-                  ? 'bg-ide-red/15 text-ide-red'
+                  ? 'bg-ide-red/15 text-ide-on-red'
                   : edit.status === 'stale'
-                    ? 'bg-ide-amber/15 text-ide-amber'
+                    ? 'bg-ide-amber/15 text-ide-on-amber'
                     : 'bg-ide-bar text-ide-faint'
             }`}
           >
@@ -266,7 +266,7 @@ function EditCard({ edit, root }: { edit: AgentEdit; root: string | null }): JSX
       </div>
       {edit.summary && <div className="border-b border-ide-border px-2.5 py-1 text-[11px] text-ide-muted">{edit.summary}</div>}
       {bigDrop && (
-        <div className="row items-center gap-1.5 border-b border-ide-amber/30 bg-ide-amber/10 px-2.5 py-1 text-[10.5px] text-ide-amber">
+        <div className="row items-center gap-1.5 border-b border-ide-amber/30 bg-ide-amber/10 px-2.5 py-1 text-[10.5px] text-ide-on-amber">
           <WarnIcon size={12} className="shrink-0" /> Removes most of the file ({oldN} to {newN} lines). Make sure this is
           intended, not a truncated response.
         </div>

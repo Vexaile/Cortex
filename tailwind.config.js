@@ -29,7 +29,13 @@ module.exports = {
           yellow: 'rgb(var(--ide-yellow) / <alpha-value>)',
           red: 'rgb(var(--ide-red) / <alpha-value>)',
           purple: 'rgb(var(--ide-purple) / <alpha-value>)',
-          cyan: 'rgb(var(--ide-cyan) / <alpha-value>)'
+          cyan: 'rgb(var(--ide-cyan) / <alpha-value>)',
+          // AA-safe badge labels (text on a bg-ide-HUE/15 tint) and a solid
+          // danger surface for white button text. See contrast.test.ts.
+          'on-red': 'rgb(var(--ide-on-red) / <alpha-value>)',
+          'on-amber': 'rgb(var(--ide-on-amber) / <alpha-value>)',
+          'on-moss': 'rgb(var(--ide-on-moss) / <alpha-value>)',
+          danger: 'rgb(var(--ide-danger) / <alpha-value>)'
         }
       },
       backgroundImage: {

@@ -68,7 +68,7 @@ export default function SerialMonitor(): JSX.Element {
           ))}
         </select>
         <button
-          className={`btn ${serialOpen ? 'bg-ide-red/80 text-white' : 'btn-accent'}`}
+          className={`btn ${serialOpen ? 'bg-ide-danger text-white' : 'btn-accent'}`}
           onClick={() => void toggleSerial()}
           disabled={!serialPath}
         >

@@ -310,7 +310,7 @@ export default function SimCanvas(): JSX.Element {
             return (
               <button
                 key={name}
-                className={`rounded px-1.5 py-0.5 ${armed ? 'bg-ide-amber/30 text-ide-amber' : bp !== null ? 'bg-ide-active text-ide-text' : 'text-ide-muted hover:bg-ide-hover'}`}
+                className={`rounded px-1.5 py-0.5 ${armed ? 'bg-ide-amber/20 text-ide-on-amber' : bp !== null ? 'bg-ide-active text-ide-text' : 'text-ide-muted hover:bg-ide-hover'}`}
                 onClick={() => (bp !== null ? detachWire(selectedPart.id, name) : beginWire(selectedPart.id, name))}
                 title={bp !== null ? 'Click to detach' : 'Click, then a board pin'}
               >

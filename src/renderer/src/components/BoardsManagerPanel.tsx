@@ -147,7 +147,7 @@ export default function BoardsManagerPanel(): JSX.Element {
                     <div className="row min-w-0 items-center gap-1.5">
                       <span className="truncate text-[12px] font-semibold text-ide-text">{c.name}</span>
                       {c.installedVersion && (
-                        <span className="shrink-0 rounded bg-ide-moss/20 px-1 text-[9px] font-semibold text-ide-moss">
+                        <span className="shrink-0 rounded bg-ide-moss/20 px-1 text-[9px] font-semibold text-ide-on-moss">
                           {c.installedVersion}
                         </span>
                       )}

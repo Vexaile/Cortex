@@ -28,6 +28,17 @@
     --ide-red: 224 85 97;
     --ide-purple: 197 139 230;
     --ide-cyan: 79 184 168;
+    /* Badge/label text that clears WCAG AA on a same-hue tint (the solid hue
+       does not - it shares the tint's hue). Tuned for the heaviest tint anyone
+       uses (/30) over the worst surface, so any text-ide-on-HUE on a HUE/<=30
+       tint (panel, bg or bar) is AA-safe. Pinned in contrast.test.ts. */
+    --ide-on-red: 233 136 144;
+    --ide-on-amber: 236 166 77;
+    --ide-on-moss: 137 195 120;
+    /* Solid danger surface for white button text (Stop / Disconnect). The raw
+       red is tuned as a bright text hue, so white-on-it is only ~3.7:1; both the
+       old /80 and /90 composites failed AA in one theme each. */
+    --ide-danger: 195 74 85;
     /* Scrollbar thumb: navy-tinted grays, one shade above the chrome. */
     --ide-sb: 43 52 68;
     --ide-sb-hover: 58 69 87;
@@ -61,6 +72,13 @@
     --ide-red: 200 42 54;
     --ide-purple: 138 72 192;
     --ide-cyan: 18 110 99;
+    /* Light-theme label text, darkened to clear AA on a same-hue tint up to /30
+       over the worst surface (all three dip below AA otherwise). */
+    --ide-on-red: 148 31 40;
+    --ide-on-amber: 118 68 8;
+    --ide-on-moss: 37 92 22;
+    /* Light danger surface for white text; the light red already clears white AA. */
+    --ide-danger: 200 42 54;
     --ide-sb: 196 203 214;
     --ide-sb-hover: 169 178 192;
   }

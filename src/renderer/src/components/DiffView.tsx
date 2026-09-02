@@ -59,14 +59,14 @@ export default function DiffView({ oldContent, newContent }: { oldContent: strin
             >
               <span
                 className={`w-10 shrink-0 select-none px-1 text-right ${
-                  l.type === 'add' ? 'text-ide-moss/70' : l.type === 'del' ? 'text-ide-red/70' : 'text-ide-faint/60'
+                  l.type === 'add' ? 'text-ide-on-moss' : l.type === 'del' ? 'text-ide-on-red' : 'text-ide-faint/60'
                 }`}
               >
                 {l.type === 'add' ? l.newLine : l.oldLine}
               </span>
               <span
                 className={`w-4 shrink-0 select-none text-center ${
-                  l.type === 'add' ? 'text-ide-moss' : l.type === 'del' ? 'text-ide-red' : 'text-ide-faint/50'
+                  l.type === 'add' ? 'text-ide-on-moss' : l.type === 'del' ? 'text-ide-on-red' : 'text-ide-faint/50'
                 }`}
               >
                 {l.type === 'add' ? '+' : l.type === 'del' ? '-' : ''}

@@ -66,7 +66,7 @@ export default function ConfirmDialog(): JSX.Element | null {
           </button>
           <button
             ref={confirmRef}
-            className={`btn justify-center text-white ${danger ? 'bg-ide-red hover:brightness-110' : 'btn-accent'}`}
+            className={`btn justify-center text-white ${danger ? 'bg-ide-danger hover:brightness-110' : 'btn-accent'}`}
             onClick={() => answer(true)}
           >
             {req.confirmLabel ?? 'Confirm'}

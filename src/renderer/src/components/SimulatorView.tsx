@@ -78,7 +78,7 @@ export default function SimulatorView(): JSX.Element {
           <CircuitBoard size={16} className="text-ide-navy" /> <span className="cq-label">Simulator</span>
         </span>
         {simRunning ? (
-          <button className="btn shrink-0 whitespace-nowrap bg-ide-red/90 text-white" onClick={() => void stopSim()}>
+          <button className="btn shrink-0 whitespace-nowrap bg-ide-danger text-white" onClick={() => void stopSim()}>
             <Square size={14} /> Stop
           </button>
         ) : (
@@ -207,7 +207,7 @@ export default function SimulatorView(): JSX.Element {
               the SVG scales to its box, so any overlay eventually collides with
               the board at some window size. Reserving the space cannot. */}
           <div className="shrink-0 px-3 pb-1.5 text-[10px] leading-snug text-ide-faint">
-            <span className="text-ide-amber/80">Logic view</span>: this runs your real code and shows pin signals. It
+            <span className="text-ide-on-amber">Logic view</span>: this runs your real code and shows pin signals. It
             does not model current, so a real circuit still needs GND and a resistor per LED.
           </div>
         </div>

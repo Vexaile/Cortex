@@ -101,20 +101,33 @@ raw `-O0/-Os` → Debug / Balanced / Release / Size. raw `g++/clang++` → GCC /
 
 ## Known a11y debt (tracked, from the slice-2b review)
 
-A dedicated accessibility slice (folds into Phase 10+ a11y) closes contrast
-misses that the token-pair test does not yet catch:
-- Tinted status/severity badges render `text-ide-{hue}` on `bg-ide-{hue}/15` (a
-  15% tint of the same hue over panel/bg) in EnvironmentPanel and AgentView. The
-  composited pair is lower than the solid pair the test pins: the red badge is
-  below AA in BOTH themes (pre-existing in dark, ~4.2:1), amber/moss also dip in
-  light. Fix: decouple the label hue from the tint (per-hue on-tint token, or a
-  solid darker badge with near-white/near-black text) and add composite-contrast
-  coverage to contrast.test.ts for both themes.
-- Red action buttons/badges using `bg-ide-red/80` + `text-white` (BottomPanel
-  Problems count, SerialMonitor + DevicesPanel Disconnect) measure ~4.0-4.2:1 in
-  light. The `/90` sites already clear AA; do NOT switch to solid red (regresses
-  dark to 3.72:1). Fix: a per-theme solid AA-guaranteed button-red token, plus a
-  white-on-red composite check in the test.
+**RESOLVED** (composite-contrast a11y slice):
+- ~~Tinted status/severity badges render `text-ide-{hue}` on `bg-ide-{hue}/15`,
+  composited below AA (red in both themes; amber/moss dip in light).~~ New
+  per-theme `--ide-on-red` / `--ide-on-amber` / `--ide-on-moss` label tokens
+  (registered in tailwind.config.js) decouple the label from the tint. They are
+  tuned for the HEAVIEST tint anyone uses (`/30`) over the worst surface, so any
+  `text-ide-on-{hue}` on a `HUE/<=30` tint (panel, bg or bar) is AA-safe. The
+  adversarial review found the same defect well beyond the original two panels;
+  every site now uses `on-{hue}`: EnvironmentPanel + AgentView badges, AgentView
+  error box + big-drop banner, DiffView `+/-` markers + gutter line numbers,
+  Boards/Library manager version pills, DevicesPanel serial-error box,
+  SimulatorView "Logic view" label, and the SimCanvas armed wiring pin (its `/30`
+  tint over the dark-canvas popover was lowered to `/20`).
+- ~~Red action buttons using `bg-ide-red/80` + `text-white` measure ~4.0-4.2:1.~~
+  Measurement showed BOTH composites failed AA in opposite themes (light `/80` =
+  4.01, dark `/90` = 4.37), and the ConfirmDialog destructive Confirm button used
+  full-opacity `bg-ide-red` (dark 3.72). All danger buttons (AgentView, BottomPanel
+  count, DevicesPanel + SerialMonitor Disconnect, SimulatorView + Toolbar Stop,
+  ConfirmDialog Confirm) now use a solid per-theme `--ide-danger` token that clears
+  white-on-red AA in both themes (dark 4.74, light 5.47).
+- contrast.test.ts composites the tint (`over()` helper) and pins every
+  `on-{hue}` label at AA on a `/30` tint over panel, bg AND bar, plus
+  white-on-`danger`, for both themes - so a palette nudge can never silently drop
+  them under AA again. Live-verified via CDP getComputedStyle (worst combo dark
+  4.62 / light 4.60 across all hues, tints and surfaces). Icons on a tint
+  (ConfirmDialog AlertTriangle) keep the raw hue: they carry the 3:1 graphic bar,
+  which the tint clears.
 
 ## Discipline
 

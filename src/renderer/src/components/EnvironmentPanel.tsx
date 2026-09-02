@@ -78,15 +78,15 @@ function Section({ title, count, children }: { title: string; count: number; chi
 }
 
 const DEP_BADGE: Record<DependencyStatus['state'], { label: string; cls: string }> = {
-  resolved: { label: 'resolved', cls: 'bg-ide-moss/15 text-ide-moss' },
+  resolved: { label: 'resolved', cls: 'bg-ide-moss/15 text-ide-on-moss' },
   'provided-by-toolchain': { label: 'toolchain', cls: 'bg-ide-bar text-ide-faint' },
-  unverified: { label: 'unverified', cls: 'bg-ide-amber/15 text-ide-amber' },
-  missing: { label: 'missing', cls: 'bg-ide-red/15 text-ide-red' }
+  unverified: { label: 'unverified', cls: 'bg-ide-amber/15 text-ide-on-amber' },
+  missing: { label: 'missing', cls: 'bg-ide-red/15 text-ide-on-red' }
 }
 const RISK_CLS: Record<UpdateStatus['risk'], string> = {
-  low: 'bg-ide-moss/15 text-ide-moss',
-  medium: 'bg-ide-amber/15 text-ide-amber',
-  high: 'bg-ide-red/15 text-ide-red',
+  low: 'bg-ide-moss/15 text-ide-on-moss',
+  medium: 'bg-ide-amber/15 text-ide-on-amber',
+  high: 'bg-ide-red/15 text-ide-on-red',
   unknown: 'bg-ide-bar text-ide-faint'
 }
 
@@ -168,26 +168,26 @@ function Reproducibility(): JSX.Element {
       {has && drift && !inSync && (
         <div className="pb-1">
           {drift.boardChanged && (
-            <DriftRow badge={{ label: 'board', cls: 'bg-ide-amber/15 text-ide-amber' }}>
+            <DriftRow badge={{ label: 'board', cls: 'bg-ide-amber/15 text-ide-on-amber' }}>
               <span className="mono text-[11px]">
                 {drift.boardChanged.from || 'none'} {'->'} {drift.boardChanged.to || 'none'}
               </span>
             </DriftRow>
           )}
           {drift.coresMissing.map((c) => (
-            <DriftRow key={`cm-${c.id}`} badge={{ label: 'missing', cls: 'bg-ide-red/15 text-ide-red' }}>
+            <DriftRow key={`cm-${c.id}`} badge={{ label: 'missing', cls: 'bg-ide-red/15 text-ide-on-red' }}>
               <span className="mono truncate">{c.id}</span>
               <span className="text-[11px] text-ide-muted">core, locked {c.version}</span>
             </DriftRow>
           ))}
           {drift.librariesMissing.map((l) => (
-            <DriftRow key={`lm-${l.name}`} badge={{ label: 'missing', cls: 'bg-ide-red/15 text-ide-red' }}>
+            <DriftRow key={`lm-${l.name}`} badge={{ label: 'missing', cls: 'bg-ide-red/15 text-ide-on-red' }}>
               <span className="truncate">{l.name}</span>
               <span className="text-[11px] text-ide-muted">locked {l.version}</span>
             </DriftRow>
           ))}
           {drift.coresChanged.map((c) => (
-            <DriftRow key={`cc-${c.id}`} badge={{ label: 'changed', cls: 'bg-ide-amber/15 text-ide-amber' }}>
+            <DriftRow key={`cc-${c.id}`} badge={{ label: 'changed', cls: 'bg-ide-amber/15 text-ide-on-amber' }}>
               <span className="mono truncate">{c.id}</span>
               <span className="text-[11px] text-ide-muted">
                 {c.installed} (locked {c.locked})
@@ -195,7 +195,7 @@ function Reproducibility(): JSX.Element {
             </DriftRow>
           ))}
           {drift.librariesChanged.map((l) => (
-            <DriftRow key={`lc-${l.name}`} badge={{ label: 'changed', cls: 'bg-ide-amber/15 text-ide-amber' }}>
+            <DriftRow key={`lc-${l.name}`} badge={{ label: 'changed', cls: 'bg-ide-amber/15 text-ide-on-amber' }}>
               <span className="truncate">{l.name}</span>
               <span className="text-[11px] text-ide-muted">
                 {l.installed} (locked {l.locked})
@@ -314,7 +314,7 @@ export default function EnvironmentPanel(): JSX.Element {
               <span className="text-[11px] text-ide-faint">No board selected</span>
             )}
             {report.core.installed && report.core.installedVersion && (
-              <span className="shrink-0 rounded bg-ide-moss/15 px-1.5 py-0.5 text-[10px] text-ide-moss">
+              <span className="shrink-0 rounded bg-ide-moss/15 px-1.5 py-0.5 text-[10px] text-ide-on-moss">
                 core {report.core.installedVersion}
               </span>
             )}

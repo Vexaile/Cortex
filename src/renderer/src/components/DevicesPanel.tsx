@@ -104,7 +104,7 @@ export default function DevicesPanel(): JSX.Element {
       </div>
       <div className="shrink-0 space-y-1.5 border-t border-ide-border p-2">
         {serialError && (
-          <div className="rounded border border-ide-red/40 bg-ide-red/10 px-2 py-1.5 text-[10px] leading-snug text-ide-red">
+          <div className="rounded border border-ide-red/40 bg-ide-red/10 px-2 py-1.5 text-[10px] leading-snug text-ide-on-red">
             {serialError}
             {/^.*(access is denied|denied).*$/i.test(serialError) && (
               <div className="mt-1 text-ide-muted">
@@ -114,7 +114,7 @@ export default function DevicesPanel(): JSX.Element {
           </div>
         )}
         <button
-          className={`btn w-full justify-center ${serialOpen ? 'bg-ide-red/80 text-white' : 'btn-accent'}`}
+          className={`btn w-full justify-center ${serialOpen ? 'bg-ide-danger text-white' : 'btn-accent'}`}
           onClick={() => void toggleSerial()}
           disabled={!serialPath}
         >

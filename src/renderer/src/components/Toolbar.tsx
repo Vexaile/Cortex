@@ -121,7 +121,7 @@ export default function Toolbar(): JSX.Element {
               <Loader2 size={13} className="animate-spin text-ide-accent motion-reduce:animate-none" />
               {phaseLabel}
             </span>
-            <button className="btn bg-ide-red/90 text-white hover:brightness-110" onClick={() => void stopRun()}>
+            <button className="btn bg-ide-danger text-white hover:brightness-110" onClick={() => void stopRun()}>
               <Square size={14} /> Stop
             </button>
           </>
@@ -139,7 +139,7 @@ export default function Toolbar(): JSX.Element {
                     live), which is the normal case: loop() never ends. */}
                 {simRunning ? (
                   <button
-                    className="btn bg-ide-red/90 text-white hover:brightness-110"
+                    className="btn bg-ide-danger text-white hover:brightness-110"
                     onClick={() => void stopSim()}
                     title="Stop the simulation"
                   >
