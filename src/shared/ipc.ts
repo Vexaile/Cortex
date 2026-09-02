@@ -89,9 +89,12 @@ export const IPC = {
   DEBUG_STATE: 'debug:state', // main -> renderer push
   DEBUG_OUTPUT: 'debug:output', // main -> renderer: program + gdb text
 
-  // Version control (git), read-only for now
+  // Version control (git)
   GIT_STATUS: 'git:status',
   GIT_DIFF: 'git:diff',
+  GIT_STAGE: 'git:stage',
+  GIT_UNSTAGE: 'git:unstage',
+  GIT_COMMIT: 'git:commit',
 
   // Simulator (Wokwi/Tinkercad-style native simulation)
   SIM_START: 'sim:start',
@@ -506,6 +509,12 @@ export interface GitStatus {
 }
 /** Which side of a file's change to diff, matching how the row is grouped. */
 export type GitDiffKind = 'staged' | 'unstaged' | 'untracked'
+/** Result of a mutating git op (stage / unstage / commit): a plain success, or
+ *  an honest error message lifted from git's own stderr. */
+export interface GitOpResult {
+  ok: boolean
+  error?: string
+}
 /** One file's diff as two contents for the shared DiffView. The pair depends on
  *  the kind: staged = HEAD (or the rename origin) vs the index; unstaged = the
  *  index vs the working tree; untracked = empty vs the working tree. `binary` is

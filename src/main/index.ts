@@ -719,6 +719,9 @@ function registerIpc(): void {
   // ---- version control (git), read-only ----
   ipcMain.handle(IPC.GIT_STATUS, () => git.status())
   ipcMain.handle(IPC.GIT_DIFF, (_e, path: string, kind: GitDiffKind, orig?: string) => git.fileDiff(path, kind, orig))
+  ipcMain.handle(IPC.GIT_STAGE, (_e, paths: string[]) => git.stage(paths))
+  ipcMain.handle(IPC.GIT_UNSTAGE, (_e, paths: string[]) => git.unstage(paths))
+  ipcMain.handle(IPC.GIT_COMMIT, (_e, message: string) => git.commit(message))
 
   // ---- settings / app ----
   // Return redacted settings only: the raw API key never crosses to the renderer.

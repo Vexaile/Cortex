@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { GitBranch, RefreshCw, ArrowUp, ArrowDown } from 'lucide-react'
+import { GitBranch, RefreshCw, ArrowUp, ArrowDown, Plus, Minus, Check } from 'lucide-react'
 import PanelHeader from './PanelHeader'
 import DiffView from './DiffView'
 import { useStore } from '../store/useStore'
-import type { GitStatus, GitFileStatus, GitFileDiff, GitDiffKind } from '@shared/ipc'
+import type { GitStatus, GitFileStatus, GitFileDiff, GitDiffKind, GitOpResult } from '@shared/ipc'
 
 const baseName = (p: string): string => p.replace(/\\/g, '/').replace(/\/$/, '').split('/').pop() || p
 const dirOf = (p: string): string => {
@@ -27,6 +27,7 @@ const SECTIONS: Section[] = [
   { kind: 'unstaged', label: 'Changes', has: (f) => f.worktree !== ' ' && f.worktree !== '?', letterFrom: (f) => f.worktree },
   { kind: 'untracked', label: 'Untracked', has: (f) => f.index === '?', letterFrom: () => '?' }
 ]
+const isStaged = SECTIONS[0].has
 
 // A one-letter tag with an AA-safe hue (the on-* tokens) for a status row.
 function tagOf(letter: string): { text: string; cls: string; title: string } {
@@ -57,8 +58,12 @@ interface OpenDesc {
 
 export default function VcsPanel(): JSX.Element {
   const workspaceRoot = useStore((s) => s.workspaceRoot)
+  const notify = useStore((s) => s.notify)
   const [status, setStatus] = useState<GitStatus | null>(null)
   const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+  const [commitError, setCommitError] = useState<string | null>(null)
   const [open, setOpen] = useState<OpenDesc | null>(null)
   const [diff, setDiff] = useState<GitFileDiff | null>(null)
   const statusGen = useRef(0)
@@ -124,6 +129,46 @@ export default function VcsPanel(): JSX.Element {
     void loadDiff(d)
   }
 
+  // Run a mutating op, then refresh. Serialized behind `busy` so a double click
+  // cannot fire two overlapping stage/commit calls.
+  const doOp = async (op: () => Promise<GitOpResult>): Promise<GitOpResult> => {
+    if (busy) return { ok: false, error: 'A git operation is already running.' }
+    setBusy(true)
+    let r: GitOpResult
+    try {
+      r = await op()
+    } catch {
+      r = { ok: false, error: 'git operation failed.' }
+    }
+    // Stay busy THROUGH the refresh: clearing it before the gitStatus round-trip
+    // reopens a window where the (still-stale) staged count + message re-enable
+    // Commit, so a held Enter could fire a second (spurious) commit.
+    try {
+      await refresh()
+    } catch {
+      /* refresh guards its own errors; never leave busy stuck */
+    } finally {
+      setBusy(false)
+    }
+    return r
+  }
+
+  const files = status?.files ?? []
+  const stagedCount = files.filter(isStaged).length
+  const canCommit = stagedCount > 0 && msg.trim().length > 0 && !busy
+
+  const doCommit = async (): Promise<void> => {
+    if (!canCommit) return
+    setCommitError(null)
+    const r = await doOp(() => window.api.gitCommit(msg))
+    if (r.ok) {
+      notify('success', 'Committed', `${stagedCount} file${stagedCount === 1 ? '' : 's'}`)
+      setMsg('')
+    } else {
+      setCommitError(r.error ?? 'Commit failed.')
+    }
+  }
+
   const header = (
     <PanelHeader
       icon={<GitBranch size={13} />}
@@ -170,7 +215,20 @@ export default function VcsPanel(): JSX.Element {
     )
   }
 
-  const files = status?.files ?? []
+  const actionBtn = (kind: GitDiffKind, paths: string[], label: string): JSX.Element => (
+    <button
+      className="grid h-4 w-4 shrink-0 place-items-center rounded text-ide-faint opacity-0 hover:bg-ide-hover hover:text-ide-text group-hover:opacity-100 disabled:cursor-not-allowed"
+      title={label}
+      aria-label={label}
+      disabled={busy}
+      onClick={(e) => {
+        e.stopPropagation()
+        void doOp(() => (kind === 'staged' ? window.api.gitUnstage(paths) : window.api.gitStage(paths)))
+      }}
+    >
+      {kind === 'staged' ? <Minus size={12} /> : <Plus size={12} />}
+    </button>
+  )
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -194,6 +252,32 @@ export default function VcsPanel(): JSX.Element {
         </div>
       )}
 
+      {files.length > 0 && (
+        <div className="border-b border-ide-border/60 px-2 py-1.5">
+          <input
+            className="h-7 w-full rounded border border-ide-border bg-ide-bg px-2 text-[12px] text-ide-text outline-none placeholder:text-ide-faint focus:border-ide-accent disabled:opacity-50"
+            placeholder={stagedCount > 0 ? 'Commit message' : 'Stage changes, then commit'}
+            value={msg}
+            disabled={busy}
+            onChange={(e) => setMsg(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void doCommit()
+            }}
+          />
+          <button
+            className="btn btn-accent mt-1 h-7 w-full justify-center text-[12px] disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={!canCommit}
+            onClick={() => void doCommit()}
+            title={
+              stagedCount === 0 ? 'Stage changes first' : !msg.trim() ? 'Enter a commit message' : 'Commit staged changes'
+            }
+          >
+            <Check size={13} /> Commit{stagedCount > 0 ? ` (${stagedCount})` : ''}
+          </button>
+          {commitError && <div className="mono mt-1 text-[11px] text-ide-on-red">{commitError}</div>}
+        </div>
+      )}
+
       <div className="min-h-0 flex-1 overflow-auto">
         {files.length === 0 ? (
           <div className="px-3 py-3 text-center text-[11px] text-ide-faint">
@@ -205,9 +289,12 @@ export default function VcsPanel(): JSX.Element {
             if (group.length === 0) return null
             return (
               <div key={sec.kind} className="border-b border-ide-border/40 pb-1 last:border-b-0">
-                <div className="row h-6 items-center gap-1 px-3 text-[10px] font-semibold uppercase tracking-wider text-ide-muted">
+                <div className="group row h-6 items-center gap-1 px-3 text-[10px] font-semibold uppercase tracking-wider text-ide-muted">
                   {sec.label}
                   <span className="text-ide-faint">({group.length})</span>
+                  <span className="ml-auto">
+                    {actionBtn(sec.kind, group.map((f) => f.path), sec.kind === 'staged' ? 'Unstage all' : 'Stage all')}
+                  </span>
                 </div>
                 {group.map((f) => {
                   const key = `${sec.kind}:${f.path}`
@@ -215,18 +302,19 @@ export default function VcsPanel(): JSX.Element {
                   const isOpen = open?.key === key
                   const dir = dirOf(f.path)
                   return (
-                    <div key={key}>
-                      <button
-                        className={`row w-full items-baseline gap-2 px-3 py-0.5 text-left text-[11px] hover:bg-ide-hover ${
-                          isOpen ? 'bg-ide-accent/10' : ''
-                        }`}
-                        onClick={() => select({ key, path: f.path, kind: sec.kind, orig: f.orig })}
-                        title={`${t.title}: ${f.path}${f.orig ? ` (from ${f.orig})` : ''}`}
-                      >
-                        <span className={`mono w-3 shrink-0 text-center font-semibold ${t.cls}`}>{t.text}</span>
-                        <span className="truncate text-ide-text">{baseName(f.path)}</span>
-                        {dir && <span className="ml-auto truncate pl-2 text-[10px] text-ide-faint">{dir}</span>}
-                      </button>
+                    <div key={key} className="group">
+                      <div className={`row items-baseline gap-2 pl-3 pr-2 text-[11px] hover:bg-ide-hover ${isOpen ? 'bg-ide-accent/10' : ''}`}>
+                        <button
+                          className="row min-w-0 flex-1 items-baseline gap-2 py-0.5 text-left"
+                          onClick={() => select({ key, path: f.path, kind: sec.kind, orig: f.orig })}
+                          title={`${t.title}: ${f.path}${f.orig ? ` (from ${f.orig})` : ''}`}
+                        >
+                          <span className={`mono w-3 shrink-0 text-center font-semibold ${t.cls}`}>{t.text}</span>
+                          <span className="truncate text-ide-text">{baseName(f.path)}</span>
+                          {dir && <span className="ml-auto truncate pl-2 text-[10px] text-ide-faint">{dir}</span>}
+                        </button>
+                        {actionBtn(sec.kind, [f.path], sec.kind === 'staged' ? 'Unstage' : 'Stage')}
+                      </div>
                       {isOpen && (
                         <div className="border-y border-ide-border/60 bg-ide-bg/40">
                           {!diff ? (

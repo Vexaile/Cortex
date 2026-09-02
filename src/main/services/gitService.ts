@@ -2,7 +2,7 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { readFile } from 'fs/promises'
 import { join } from 'path'
-import type { GitStatus, GitFileDiff, GitDiffKind } from '../../shared/ipc'
+import type { GitStatus, GitFileDiff, GitDiffKind, GitOpResult } from '../../shared/ipc'
 import { parsePorcelain } from '../../shared/gitStatus'
 import { getWorkspaceRoot, withinWorkspace } from './fsService'
 import { safeCommand, needsShell } from './commandResolver'
@@ -117,4 +117,81 @@ export async function fileDiff(relPath: string, kind: GitDiffKind, orig?: string
   }
   const binary = oldContent.includes('\0') || newContent.includes('\0')
   return { path: relPath, oldContent: binary ? '' : oldContent, newContent: binary ? '' : newContent, binary }
+}
+
+// ---- mutations (stage / unstage / commit) ---------------------------------
+
+/** Run a mutating git command; on failure lift git's own stderr as the error,
+ *  first line only and length-capped, so the panel can show it honestly. */
+async function runMutation(cwd: string, args: string[]): Promise<GitOpResult> {
+  const bin = safeCommand('git', getWorkspaceRoot())
+  if (!bin || needsShell(bin)) return { ok: false, error: 'git is not available on PATH.' }
+  try {
+    await execFileAsync(bin, args, { cwd, windowsHide: true, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })
+    return { ok: true }
+  } catch (e) {
+    // git writes its real reason to stderr OR (for `commit` with nothing to
+    // commit) to stdout. Deliberately NEVER fall back to Node's e.message: it is
+    // "Command failed: <absolute git.exe path> commit -m <the message>", which
+    // leaks the binary path and the user's commit text and is not git's reason.
+    const err = e as { stderr?: string; stdout?: string }
+    const lines = (s: unknown): string[] =>
+      String(s ?? '').split('\n').map((x) => x.trim()).filter((x) => x.length > 0 && !x.startsWith('Command failed'))
+    const stderr = lines(err?.stderr)
+    const stdout = lines(err?.stdout)
+    // stderr's first line is the reason for fatal:/error:/identity failures. A
+    // `commit` with nothing to do prints only to stdout, where the reason is the
+    // LAST line ("nothing to commit ...") after a generic "On branch X" header.
+    const msg = stderr[0] || stdout[stdout.length - 1] || 'git command failed.'
+    return { ok: false, error: msg.slice(0, 300) }
+  }
+}
+
+/** Validate and normalize a caller-supplied list of repo-relative paths: reject
+ *  a newline/NUL (could not come from status) and confine each to the workspace.
+ *  Returns forward-slashed paths, or null if any is unacceptable. */
+function safePaths(root: string, paths: unknown): string[] | null {
+  if (!Array.isArray(paths) || paths.length === 0 || paths.length > 10000) return null
+  const out: string[] = []
+  for (const p of paths) {
+    if (typeof p !== 'string' || p.length === 0 || /[\r\n\0]/.test(p)) return null
+    if (!withinWorkspace(join(root, p))) return null
+    out.push(gp(p))
+  }
+  return out
+}
+
+export async function stage(paths: string[]): Promise<GitOpResult> {
+  const root = await repoRoot()
+  if (!root) return { ok: false, error: 'Not a git repository.' }
+  const ps = safePaths(root, paths)
+  if (!ps) return { ok: false, error: 'Invalid path.' }
+  // `--` ends options, so a path beginning with '-' is a path, never a flag.
+  return runMutation(root, ['add', '--', ...ps])
+}
+
+export async function unstage(paths: string[]): Promise<GitOpResult> {
+  const root = await repoRoot()
+  if (!root) return { ok: false, error: 'Not a git repository.' }
+  const ps = safePaths(root, paths)
+  if (!ps) return { ok: false, error: 'Invalid path.' }
+  // `git reset` needs a HEAD to reset the index against; before the first commit
+  // there is none, so an added path is dropped from the index instead.
+  const head = await runGit(root, ['rev-parse', '--verify', 'HEAD'])
+  // -f only overrides the "staged content differs" refusal for an added-then-
+  // edited file; --cached keeps it index-only, so the working file is never
+  // touched (it becomes untracked, matching what `git reset` does with a HEAD).
+  return head.ok
+    ? runMutation(root, ['reset', '--quiet', '--', ...ps])
+    : runMutation(root, ['rm', '--cached', '-f', '--quiet', '--', ...ps])
+}
+
+export async function commit(message: string): Promise<GitOpResult> {
+  const root = await repoRoot()
+  if (!root) return { ok: false, error: 'Not a git repository.' }
+  if (typeof message !== 'string' || !message.trim()) return { ok: false, error: 'Enter a commit message.' }
+  // The message is a single argv (no shell), so newlines and metacharacters in
+  // it are literal text, never interpretable as commands. git itself rejects an
+  // empty index ("nothing to commit") or a missing identity, surfaced as-is.
+  return runMutation(root, ['commit', '-m', message])
 }

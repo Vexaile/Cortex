@@ -29,6 +29,7 @@ import type {
   GitStatus,
   GitFileDiff,
   GitDiffKind,
+  GitOpResult,
   SimStartRequest,
   SimEvent,
   SimExit,
@@ -143,6 +144,9 @@ const api = {
   gitStatus: (): Promise<GitStatus> => ipcRenderer.invoke(IPC.GIT_STATUS),
   gitDiff: (path: string, kind: GitDiffKind, orig?: string): Promise<GitFileDiff | null> =>
     ipcRenderer.invoke(IPC.GIT_DIFF, path, kind, orig),
+  gitStage: (paths: string[]): Promise<GitOpResult> => ipcRenderer.invoke(IPC.GIT_STAGE, paths),
+  gitUnstage: (paths: string[]): Promise<GitOpResult> => ipcRenderer.invoke(IPC.GIT_UNSTAGE, paths),
+  gitCommit: (message: string): Promise<GitOpResult> => ipcRenderer.invoke(IPC.GIT_COMMIT, message),
   onDebugState: (cb: (s: DebugState) => void): Unsub => on(IPC.DEBUG_STATE, cb),
   onDebugOutput: (cb: (o: DebugOutput) => void): Unsub => on(IPC.DEBUG_OUTPUT, cb),
 
